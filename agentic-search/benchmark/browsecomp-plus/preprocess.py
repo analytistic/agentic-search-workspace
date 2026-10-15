@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 
-DEFAULT_CORPUS = Path("data/browsecomp-plus/raw/corpus/data")
+DEFAULT_CORPUS = Path("data/browsecomp_plus/raw/corpus/data")
 DEFAULT_OUTPUT = Path("agentic-search/benchmark/browsecomp-plus/artifacts")
 PASSAGE_SIZE = 250
 SUPPORTED_RETRIEVERS = ("bm25",)

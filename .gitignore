@@ -2,8 +2,17 @@
 # the outer research repository's Git history.
 /literature/
 
-# data: raw downloads, LFS clones, corpora — not committed (fetched on demand)
-data/
+# data: payloads (raw downloads, LFS clones, corpora, indexes) stay out of
+# Git; download scripts and directory structure are tracked via the ! rules.
+data/*
+data/**/*
+!data/**/
+!data/**/*.sh
+!data/**/.gitkeep
+# Embedded Git LFS clones under raw/ — keep them out (gitlinks would be added).
+data/**/raw/
+# Local test fixture — stays on disk, never tracked.
+data/wiki-demo/
 
 # Local Python tooling.
 .venv/

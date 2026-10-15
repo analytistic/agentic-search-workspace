@@ -12,7 +12,7 @@ This repository is a research workspace for agentic search. The Python project l
 - `agentic-search/pyproject.toml` defines the research package and its dependencies.
 - `agentic-search/src/agentic_search/` contains research implementation code.
 - `agentic-search/benchmark/` contains evaluation protocols, entry points, and benchmark-specific configuration.
-- `data/browsecomp-plus/README.md` documents the pinned dataset revisions and local outputs.
+- `data/browsecomp_plus/README.md` documents the pinned dataset revisions and local outputs.
 - `.agent/.env` holds local evaluation credentials and is ignored by Git.
 - `third_party/BrowseComp-Plus/` is the upstream evaluation repository; treat it as a pinned vendor checkout (plain clone, not a submodule) and do not edit it directly.
 
