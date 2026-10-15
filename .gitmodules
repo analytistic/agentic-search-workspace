@@ -1,0 +1,6 @@
+[submodule "third_party/BrowseComp-Plus"]
+	path = third_party/BrowseComp-Plus
+	url = https://github.com/texttron/BrowseComp-Plus.git
+[submodule "third_party/Knowledge-Graph-Paths-as-Intermediate-Supervision-for-Self-Evolving-Search-Agents"]
+	path = third_party/Knowledge-Graph-Paths-as-Intermediate-Supervision-for-Self-Evolving-Search-Agents
+	url = https://github.com/528why/Knowledge-Graph-Paths-as-Intermediate-Supervision-for-Self-Evolving-Search-Agents.git

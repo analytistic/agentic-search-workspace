@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-search"
+version = "0.1.0"
+description = "Research implementations and experiments for agentic search."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyserini",
+    "spacy",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_search"]

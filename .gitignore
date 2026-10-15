@@ -1,0 +1,31 @@
+# Literature inventory is reference material and is intentionally kept outside
+# the outer research repository's Git history.
+/literature/
+
+# data: raw downloads, LFS clones, corpora — not committed (fetched on demand)
+data/
+
+# Local Python tooling.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Linters / static analysis caches.
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local agent evaluation credentials and overrides.
+.agent/*
+
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
