@@ -46,7 +46,11 @@ READY_TIMEOUT="1800"
 QUERY_SIZES="1 3 5 8"
 
 # 并发测速：同时发多少个请求（每个请求 1 条 query）
-CONCURRENCY_LEVELS="1 4 8"
+# ⚠️ 已知问题：本机 + 服务器（Linux/torch_npu）上并发独立请求都会死锁
+# （多个线程同时调用 torch 前向）。默认留空 = 不测并发。
+# 正确用法：需要并发/多条时，把 query 塞进【一个请求的 queries 列表】批量发。
+# 想诊断并发时才手动改成 "1 4 8"（会卡住，每个请求 CURL_TIMEOUT 秒后超时）。
+CONCURRENCY_LEVELS=""
 
 # 每个场景重复几次取平均
 REPEATS="3"
