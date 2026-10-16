@@ -221,14 +221,26 @@ class BM25Retriever(BaseRetriever):
 class DenseRetriever(BaseRetriever):
     def __init__(self, config):
         super().__init__(config)
+        import time
+
+        t0 = time.time()
+        print(f"[load] corpus: {self.corpus_path}", flush=True)
+        self.corpus = load_corpus(self.corpus_path)
+        print(f"[load] corpus done ({len(self.corpus)} docs, {time.time() - t0:.1f}s)", flush=True)
+
+        t0 = time.time()
+        print(f"[load] index: {self.index_path}", flush=True)
         self.index = faiss.read_index(self.index_path)
+        print(f"[load] index done ({self.index.ntotal} vectors, {time.time() - t0:.1f}s)", flush=True)
         if config.faiss_gpu:
             co = faiss.GpuMultipleClonerOptions()
             co.useFloat16 = True
             co.shard = True
             self.index = faiss.index_cpu_to_all_gpus(self.index, co=co)
+            print("[load] index moved to GPU", flush=True)
 
-        self.corpus = load_corpus(self.corpus_path)
+        t0 = time.time()
+        print(f"[load] encoder: {config.retrieval_model_path}", flush=True)
         self.encoder = Encoder(
             model_name=self.retrieval_method,
             model_path=config.retrieval_model_path,
@@ -236,6 +248,7 @@ class DenseRetriever(BaseRetriever):
             max_length=config.retrieval_query_max_length,
             use_fp16=config.retrieval_use_fp16,
         )
+        print(f"[load] encoder done ({time.time() - t0:.1f}s)", flush=True)
         self.topk = config.retrieval_topk
         self.batch_size = config.retrieval_batch_size
 

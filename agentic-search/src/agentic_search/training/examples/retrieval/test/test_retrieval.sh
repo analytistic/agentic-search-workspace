@@ -47,7 +47,8 @@ LOG="/tmp/retrieval_test.log"
 
 echo "==> 启动 CPU 检索服务（无 --faiss_gpu）..."
 # OMP_NUM_THREADS=1: 避免 macOS 上 torch+faiss 线程冲突（段错误/死锁）；Linux 上也无害
-OMP_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$SERVER_DIR/retrieval_server.py" \
+# PYTHONUNBUFFERED=1: 服务日志实时写文件（否则 print 会攒在缓冲区里，看不到进度）
+OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$SERVER_DIR/retrieval_server.py" \
     --index_path "$INDEX" \
     --corpus_path "$CORPUS" \
     --topk "$TOPK" \
@@ -56,13 +57,17 @@ OMP_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$SERVER_DIR/retrieval_
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
-echo "==> 等待就绪..."
+echo "==> 等待就绪（每 5 秒刷新服务日志，可看到加载到哪一步）..."
 ready=0
 for i in $(seq 1 90); do
     if curl -fsS -o /dev/null "http://localhost:$PORT/status" 2>/dev/null; then
         ready=1
         echo "    就绪（${i}s）"
         break
+    fi
+    if [ $((i % 5)) -eq 0 ]; then
+        last_line="$(tail -1 "$LOG" 2>/dev/null | tr -d '\r' | sed 's/^ *//;s/ *$//')"
+        [ -n "$last_line" ] && echo "    [${i}s] $last_line"
     fi
     sleep 1
 done
