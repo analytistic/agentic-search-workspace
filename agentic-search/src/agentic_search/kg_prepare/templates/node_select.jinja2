@@ -1,0 +1,64 @@
+You are helping to select the most meaningful relationship to expand for knowledge graph path generation. The goal is to create coherent, multi-hop reasoning paths that can be used to generate challenging questions.
+
+## Current Path Context
+{% if path_history %}
+Path so far: {{ path_history }}
+{% endif %}
+
+## Current Node
+Title: {{ current_node.title }}
+{% if current_node.description %}
+Description: {{ current_node.description }}
+{% endif %}
+{% if current_node.attributes %}
+Attributes:
+{% for attr in current_node.attributes %}
+- {{ attr.property_label }}: {{ attr.value }}
+{% endfor %}
+{% endif %}
+
+## Available Relationships to Expand
+
+Choose one of the following relationships:
+
+{% for rel in candidates %}
+### Option {{ loop.index }}
+- **Relation**: {{ rel.relation }}
+- **Target**: {{ rel.target_title }}
+{% if rel.target_description %}
+- **Target Description**: {{ rel.target_description }}
+{% endif %}
+{% if rel.target_attributes %}
+- **Target Attributes**:
+{% for attr in rel.target_attributes %}
+  - {{ attr.property_label }}: {{ attr.value }}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+## Selection Criteria
+
+Select the relationship that would create the most coherent and interesting path for generating difficult multi-hop reasoning questions. Consider:
+
+1. **Semantic Coherence**: The relationship should logically connect to the current node
+2. **Information Richness**: Prefer targets with more specific, factual information
+3. **Reasoning Potential**: Choose relationships that enable multi-step reasoning chains
+4. **Uniqueness**: Avoid overly generic or common relationships
+5. **Question Difficulty**: Prefer paths that would require combining multiple facts
+
+**Important**: If ALL candidates are too generic, unrelated, or would not contribute to a meaningful reasoning path, you may choose to end the path here by outputting 0.
+
+## Output Format
+
+Output ONLY a valid JSON object with exactly these keys:
+- `think`: your concise reasoning
+- `answer`: a number as string or number (`0` to `{{ candidates|length }}`)
+
+Rules:
+- `answer` must be one of: `0`, `1`, `2`, ..., `{{ candidates|length }}`
+- `0` means reject all options
+- Do NOT output markdown, code fences, or extra text outside JSON
+
+Example:
+{"think":"Option 2 is most coherent and information-rich.","answer":2}

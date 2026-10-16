@@ -13,5 +13,14 @@ dependencies = [
     "spacy",
 ]
 
+[project.optional-dependencies]
+# Dense retrieval (FAISS). CPU build is pip-installable; the GPU build on
+# PyPI is capped at faiss-gpu==1.7.4 — newer GPU versions require conda
+# (conda-forge faiss-gpu) and should be added in the deployed environment.
+retrieval-cpu = [
+    "faiss-cpu>=1.8",
+]
+retrieval-gpu = ["faiss-gpu>=1.7.4"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_search"]
