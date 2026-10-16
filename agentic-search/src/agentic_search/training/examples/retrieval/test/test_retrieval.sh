@@ -39,6 +39,10 @@ MODEL="$REPO_ROOT/data/wiki_2018/model/intfloat/e5-base-v2"
 # 服务端口
 PORT="8000"
 
+# 就绪超时（秒）：服务器上 64GB 索引 + 2100 万语料加载可达 10-20 分钟，
+# demo 数据几秒就好；等太久就调大这个值
+READY_TIMEOUT="1800"
+
 # 每批返回 top-k 条
 TOPK="3"
 # ============================================================
@@ -57,9 +61,9 @@ OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$SE
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
-echo "==> 等待就绪（每 5 秒刷新服务日志，可看到加载到哪一步）..."
+echo "==> 等待就绪（每 5 秒刷新服务日志，可看到加载到哪一步；超时 ${READY_TIMEOUT}s）..."
 ready=0
-for i in $(seq 1 90); do
+for i in $(seq 1 "$READY_TIMEOUT"); do
     if curl -fsS -o /dev/null "http://localhost:$PORT/status" 2>/dev/null; then
         ready=1
         echo "    就绪（${i}s）"
