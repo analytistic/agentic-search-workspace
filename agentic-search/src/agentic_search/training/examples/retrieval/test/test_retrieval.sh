@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
-# CPU retrieval server smoke test + latency benchmark.
+# Retrieval server benchmark: batch-size matrix + concurrency matrix.
 #
-# 1) 启动检索服务（CPU 模式，不加 --faiss_gpu）
-# 2) 等待 /status 就绪
-# 3) 发送 3 条 query 批量测速
-# 4) 发送 5 条 query 批量测速
-# 5) 自动停止服务
+# 1) 启动检索服务（CPU 模式）
+# 2) 等待 /status 就绪（每 5 秒刷新服务日志）
+# 3) 预热 1 轮（让模型/缓存热起来）
+# 4) 批量测速: 对每个 QUERY_SIZES 中的条数, 重复 REPEATS 次取平均
+# 5) 并发测速: 对每个 CONCURRENCY_LEVELS 中的并发数, 同时发 N 个请求测吞吐
+# 6) 自动停止服务
 #
-# 用法：直接修改下方【配置区】的路径，然后执行:
-#   bash test_retrieval.sh
+# 用法: 改【配置区】后执行: bash test_retrieval.sh
 
 set -euo pipefail
 
 # ---- 仓库根目录（脚本位于 <repo>/agentic-search/src/agentic_search/training/examples/retrieval/test/）----
-# 自动探测一次；如果探测不对，手动改掉即可
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../../.." && pwd)}"
 
 # ========================== 配置区 ==========================
-# 按你的机器环境直接改这里，不需要命令行参数
 # -----------------------------------------------------------
 
 # Python 解释器（uv 项目环境；服务器上可按需换成绝对路径）
@@ -39,19 +37,59 @@ MODEL="$REPO_ROOT/data/wiki_2018/model/intfloat/e5-base-v2"
 # 服务端口
 PORT="8000"
 
-# 就绪超时（秒）：服务器上 64GB 索引 + 2100 万语料加载可达 10-20 分钟，
-# demo 数据几秒就好；等太久就调大这个值
+# 就绪超时（秒）：服务器全量加载 10-20 分钟；demo 几秒
 READY_TIMEOUT="1800"
+
+# ---- 测速场景设置 ----
+
+# 批量测速：每请求塞多少条 query（空格分隔，逐个测）
+QUERY_SIZES="1 3 5 8"
+
+# 并发测速：同时发多少个请求（每个请求 1 条 query）
+CONCURRENCY_LEVELS="1 4 8"
+
+# 每个场景重复几次取平均
+REPEATS="3"
+
+# 预热轮数（不计入统计，让模型/缓存热起来）
+WARMUP="1"
+
+# 每个请求的 curl 超时（秒）——请求挂起时不阻塞整个测速，超时记为失败
+CURL_TIMEOUT="60"
 
 # 每批返回 top-k 条
 TOPK="3"
+
+# ---- 查询池（测速用的 query，按需增删）----
+QUERY_POOL=(
+    "Who founded the University of Cambridge?"
+    "What is the capital of France?"
+    "Albert Einstein theory of relativity"
+    "Python programming language creator"
+    "Great Wall of China history"
+    "Mount Everest height and location"
+    "Shakespeare most famous plays"
+    "Silicon Valley tech companies"
+)
 # ============================================================
 
 LOG="/tmp/retrieval_test.log"
 
+# 从查询池取前 N 条，生成 JSON 请求体（查询池通过环境变量 QPOOL 注入）
+make_payload() {
+    python3 - "$1" "$TOPK" <<'EOF'
+import json, os, sys
+n, topk = int(sys.argv[1]), int(sys.argv[2])
+pool = json.loads(os.environ["QPOOL"])
+print(json.dumps({"queries": pool[:n], "topk": topk, "return_scores": True}))
+EOF
+}
+
+export QPOOL="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${QUERY_POOL[@]}")"
+
 echo "==> 启动 CPU 检索服务（无 --faiss_gpu）..."
-# OMP_NUM_THREADS=1: 避免 macOS 上 torch+faiss 线程冲突（段错误/死锁）；Linux 上也无害
-# PYTHONUNBUFFERED=1: 服务日志实时写文件（否则 print 会攒在缓冲区里，看不到进度）
+# OMP_NUM_THREADS=1: 避免 macOS 上 torch+faiss 线程冲突；Linux 无害
+# PYTHONUNBUFFERED=1: 服务日志实时落盘
 OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$SERVER_DIR/retrieval_server.py" \
     --index_path "$INDEX" \
     --corpus_path "$CORPUS" \
@@ -61,7 +99,7 @@ OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$SE
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
-echo "==> 等待就绪（每 5 秒刷新服务日志，可看到加载到哪一步；超时 ${READY_TIMEOUT}s）..."
+echo "==> 等待就绪（每 5 秒刷新服务日志；超时 ${READY_TIMEOUT}s）..."
 ready=0
 for i in $(seq 1 "$READY_TIMEOUT"); do
     if curl -fsS -o /dev/null "http://localhost:$PORT/status" 2>/dev/null; then
@@ -81,24 +119,55 @@ if [ "$ready" -ne 1 ]; then
     exit 1
 fi
 
-post_batch() {
-    local label="$1" payload="$2"
-    local start_ns end_ns elapsed_ms
+# 单次请求耗时（毫秒），返回响应体（变量 RESULT_BODY）
+request_ms() {
+    local payload="$1"
+    local start_ns end_ns
     start_ns=$(python3 -c 'import time; print(time.time_ns())')
-    local body
-    body="$(curl -s -X POST "http://localhost:$PORT/retrieve" \
+    RESULT_BODY="$(curl -s --max-time "$CURL_TIMEOUT" -X POST "http://localhost:$PORT/retrieve" \
         -H "Content-Type: application/json" -d "$payload")"
     end_ns=$(python3 -c 'import time; print(time.time_ns())')
-    elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
-    local count
-    count="$(printf '%s' "$body" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["result"]))')"
-    echo "    $label: ${elapsed_ms} ms（返回 ${count} 组结果）"
+    echo $(( (end_ns - start_ns) / 1000000 ))
 }
 
-echo "==> 3 queries 批量测速"
-post_batch "3 queries" '{"queries": ["Who founded the University of Cambridge?", "What is the capital of France?", "Albert Einstein theory of relativity"], "topk": '"$TOPK"', "return_scores": true}'
+echo "==> 预热（${WARMUP} 轮）..."
+for _ in $(seq 1 "${WARMUP:-1}"); do
+    request_ms "$(make_payload 1)" > /dev/null
+done
+echo "    预热完成"
 
-echo "==> 5 queries 批量测速"
-post_batch "5 queries" '{"queries": ["Who founded the University of Cambridge?", "What is the capital of France?", "Albert Einstein theory of relativity", "Python programming language creator", "Great Wall of China history"], "topk": '"$TOPK"', "return_scores": true}'
+echo
+echo "================ 批量测速（每请求 N 条 query）================"
+printf "%-14s %-12s %-14s %-14s\n" "每条数" "平均耗时(ms)" "每query(ms)" "吞吐(q/s)"
+for size in $QUERY_SIZES; do
+    total=0
+    for _ in $(seq 1 "$REPEATS"); do
+        ms=$(request_ms "$(make_payload "$size")")
+        total=$((total + ms))
+    done
+    avg=$((total / REPEATS))
+    per_query=$((avg / size))
+    qps=$((size * 1000 / avg))
+    printf "%-14s %-12s %-14s %-14s\n" "$size" "$avg" "$per_query" "$qps"
+done
 
+echo
+echo "================ 并发测速（N 个请求同时发，每请求 1 条）================"
+printf "%-14s %-16s %-14s %-16s\n" "并发数" "总耗时(ms)" "每请求(ms)" "吞吐(req/s)"
+for n in $CONCURRENCY_LEVELS; do
+    payload="$(make_payload 1)"
+    start_ns=$(python3 -c 'import time; print(time.time_ns())')
+    for _ in $(seq 1 "$n"); do
+        curl -s --max-time "$CURL_TIMEOUT" -o /dev/null -X POST "http://localhost:$PORT/retrieve" \
+            -H "Content-Type: application/json" -d "$payload" &
+    done
+    wait
+    end_ns=$(python3 -c 'import time; print(time.time_ns())')
+    total_ms=$(( (end_ns - start_ns) / 1000000 ))
+    per_req=$((total_ms / n))
+    rps=$((n * 1000 / total_ms))
+    printf "%-14s %-16s %-14s %-16s\n" "$n" "$total_ms" "$per_req" "$rps"
+done
+
+echo
 echo "==> 完成，服务已停止"

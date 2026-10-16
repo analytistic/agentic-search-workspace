@@ -38,7 +38,9 @@ def main() -> int:
     )
     generator = LLMPathGenerator(client, path_config)
     distractors = DistractorGenerator(client, DistractorConfig(min_distractors=0, max_distractors=3))
+    print(f"[seed] requesting up to {args.num_paths * 5} candidates", flush=True)
     candidates = client.get_entities_by_degree_range(args.min_degree, args.max_degree, args.num_paths * 5)
+    print(f"[seed] degree candidates={len(candidates)} lru={len(client._lru)}", flush=True)
     seeds = []
     for item in candidates:
         qid = item["wikidata_id"]
@@ -46,6 +48,7 @@ def main() -> int:
         title = item["wikipedia_title"]
         if entropy >= args.min_entropy and generator.node_filter.check_label_quality(title):
             seeds.append(qid)
+            print(f"[seed] accepted {qid} title={title!r} degree={item['anchor_count']} entropy={entropy:.2f}", flush=True)
         if len(seeds) >= args.num_paths:
             break
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -54,14 +57,20 @@ def main() -> int:
         for seed in seeds:
             entity = client._ensure_entity(seed)
             seed_title = entity.get("wikipedia_title", seed) if entity else seed
+            print(f"[path] start seed={seed} title={seed_title!r}", flush=True)
+            print(f"[path] querying relations for seed={seed}", flush=True)
             path = generator.generate_path_from_seed(seed_title)
             if not path:
+                print(f"[path] failed seed={seed}", flush=True)
                 continue
+            print(f"[path] generated seed={seed} hops={path.length}", flush=True)
             qa = distractors.create_qa_with_distractors(path, 1)
             if not qa:
+                print(f"[path] distractor/QA rejected seed={seed}", flush=True)
                 continue
             handle.write(json.dumps(qa.to_dict(), ensure_ascii=False) + "\n")
             written += 1
+            print(f"[write] path {written}/{args.num_paths}", flush=True)
             print(f"wrote path {written}/{args.num_paths}: {path.to_dict()['path']}", flush=True)
             if written >= args.num_paths:
                 break

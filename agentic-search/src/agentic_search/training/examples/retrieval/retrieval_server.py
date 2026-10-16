@@ -56,7 +56,6 @@ def load_docs(corpus, doc_idxs):
 
 
 def load_model(model_path: str, use_fp16: bool = False):
-    torch.set_num_threads(1)  # avoid macOS OpenMP deadlock inside threaded servers
     model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
     model.eval()
     model.to(_device())
