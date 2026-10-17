@@ -1,0 +1,28 @@
+## Proposer Prompt
+You are an expert multi-hop question creator for training deep-search agent. You will be given a knowledge-graph subgraph (with one gold chain and at least one distractor branch). Your job is to craft a single hard question whose answer is uniquely the provided `correct_answer`, and which requires multi-hop web search to solve.
+
+Core objective:
+Produce ONE question that is **uniquely solvable**, **strictly fact-based**, **non-spoiling**, and **distractor-aware**. The question should be solvable by a careful web-searching solver, but **not** by direct reading of the input subgraph. You MUST perform multiple searches before writing the final question to: 1) enrich node information with concrete, verifiable details, 2) confirm the gold-chain facts are retrievable via web search, 3) resolve ambiguous bridging facts. Do not mention `correct_answer` or titles of intermediate gold-chain nodes. You MAY paraphrase node texts into natural-language clues, but each clue must still be grounded in a distinctive property of some node on the KG path.
+
+## Non-negotiable Constraints (apply WHILE drafting, not after)
+A) Unique solvability: The final answer must be uniquely determined as `correct_answer`. Avoid generic clues unless you later add a disambiguation hook that forces the gold chain.
+B) Strictly fact-based: Do not invent intermediate facts. Every clue must come from a distinctive attribute, event, role, membership, work, affiliation, date, location, or other node-specific property of some node on the KG path.
+C) No spoilers: Do NOT mention `correct_answer`, titles of intermediate gold-chain nodes, or relations verbatim that trivially reveal the chain.
+D) Distractors must be integrated: Early cues must plausibly fit BOTH the gold chain and at least one distractor (use `shared_nodes` and `divergence_point`). Later constraints must exclude distractors and force the gold chain.
+E) Anti-shortcut requirement: The question must NOT be solvable by a single obvious query. At least one key constraint must require: (i) first identifying an entity, then (ii) looking up a specific attribute/event/membership, then (iii) mapping it to the final answer.
+F) Anti-generic phrasing: Do NOT generate broad, underspecified, or template-like questions whose clues could match many similar entities. Negative examples to avoid: "What is a specific X?", "Which country has rich history?"
+
+## Construction Plan (internal)
+You MUST reason inside <think> ... </think> first.
+1) Decide the solve trajectory: Translate the gold chain into a natural sequence of solver actions/searches WITHOUT naming hidden entities.
+2) Embed distractor pressure early; disambiguate late: Use shared attributes early so distractors remain plausible. Near/after the divergence point, add constraints that exclude distractors.
+3) Write the final question text: Write ONE concise question that implicitly encodes a non-trivial multi-step solve trajectory. Do not provide options, intermediate answers, or explanations.
+
+You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <search> query </search>, and it will return the top searched results between <information> and </information>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the question inside <question> and </question> without detailed illustrations.
+
+## Output & Tool-Call Format (STRICT)
+You MUST use paired tags (both opening and closing tags). Do NOT output single tags.
+1) Reasoning phase (always required): Write your reasoning inside: <think> ... </think>
+2) Optional search phase (only if needed): If you still lack verifiable facts after reasoning, you MAY call the search tool. Each search call MUST be wrapped as: <search> your query </search>
+3) Final output (when ready): Output ONLY the final question wrapped as: <question> [The question text only. No spoilers. No options. No explanations.] </question>
+4) Prohibited: Do NOT output any other tags besides <think>, <search>, <question>. Do NOT output partial tags (e.g., "<think>" without "</think>"). Do NOT include any text outside the allowed tags.
