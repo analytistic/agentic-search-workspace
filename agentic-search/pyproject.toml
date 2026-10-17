@@ -7,20 +7,35 @@ name = "agentic-search"
 version = "0.1.0"
 description = "Research implementations and experiments for agentic search."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-    "pyserini",
-    "spacy",
+    "pyserini==1.4.0",
+    "spacy==3.8.16",
+    "numpy==1.26.4",
+    "verl",
 ]
 
 [project.optional-dependencies]
-# Dense retrieval (FAISS). CPU build is pip-installable; the GPU build on
-# PyPI is capped at faiss-gpu==1.7.4 — newer GPU versions require conda
-# (conda-forge faiss-gpu) and should be added in the deployed environment.
 retrieval-cpu = [
     "faiss-cpu>=1.8",
 ]
 retrieval-gpu = ["faiss-gpu>=1.7.4"]
+
+training-npu = [
+    "torch==2.10.0",
+    "transformers==5.5.4",
+    "ray==2.48.0",
+]
+
+training-cpu = [
+    "torch==2.10.0",
+    "transformers==5.5.4",
+    "ray==2.48.0",
+]
+
+
+[tool.uv.sources]
+verl = { path = "src/agentic_search/training/verl", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_search"]
