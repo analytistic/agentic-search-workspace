@@ -6,12 +6,45 @@ defaults:
   - ppo_trainer
   - _self_
 
+# Algorithm selector for KG self-play.
+algorithm:
+  name: kg_self_play
+  rollout_format: ssp_kg
+  chat_template: default
+  adv_estimator: grpo
+
 reward_model:
   model:
-    type: default
+    type: ssp_kg
+  reward_manager: ssp_kg
+
+custom_reward_functions:
+  process_score:
+    labels:
+      - unknown
+    integration: sum
+    kwargs:
+      alpha: 0.3
+      think_only: true
+      case_sensitive: false
+      max_search_calls: 10
+      max_response_tokens: 8192
+      node_filter_mode: named_entity_only
+
+diff_val_reward_fn_config:
+  reward_model:
+    reward_manager: naive_with_prompt
+  data:
+    reward_fn_key: data_source
+  custom_reward_function:
+    path: quarl/reward/score/search_eval_score.py
+    name: compute_score
+
+
 
 actor_rollout_ref:
   rollout:
+    name: vllm
     multi_turn:
       max_assistant_turns: 10 # maximum assistant turns
       format: ssp_kg
@@ -21,23 +54,10 @@ actor_rollout_ref:
       tool_config_path: null # tool config path
 
 
- # Trainer configuration overrides
-
-ssp_kg:
-  task_type: origin
-  diff_val_reward_fn_config: # for ssp_kg deep search
-    reward_model:
-      reward_manager: naive
-    data:
-      reward_fn_key: data_source
-    custom_reward_function:
-      path: null
-      name: compute_score
 
 # Self-Play specific configuration
 self_play:
-  
-  enable: false
+  enable: true
   generation_data_path: null # Path to problem generation seed data
   lang: zh # zh or en
   save_freq: 5

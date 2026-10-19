@@ -1,5 +1,4 @@
 import json
-import os
 
 from pydantic import BaseModel
 
@@ -77,8 +76,8 @@ class SearchChatTemplate:
         },
     }
 
-    # The current template type is obtained from the environment variable CHAT_TEMPLATE
-    _current_template = os.getenv("SEARCH_CHAT_TEMPLATE", "default")
+    # The active template is selected explicitly by the training YAML config.
+    _current_template = "default"
 
     @classmethod
     def set_template(cls, template_type="default"):

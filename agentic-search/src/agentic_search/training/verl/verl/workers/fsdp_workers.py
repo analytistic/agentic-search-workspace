@@ -484,7 +484,6 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             # TODO: a sharding manager that do nothing?
 
         elif rollout_name == "vllm":
-            from verl.workers.rollout.vllm_rollout import vLLMRollout
             from verl.workers.sharding_manager.fsdp_vllm import FSDPVLLMShardingManager
 
             log_gpu_memory_usage(f"Before building {rollout_name} rollout", logger=logger)
@@ -497,7 +496,15 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             # lora_kwargs = {}
             from verl.workers.rollout.vllm_rollout import vLLMAsyncRollout
 
-            vllm_rollout_cls = vLLMRollout if self.config.rollout.mode == "sync" else vLLMAsyncRollout
+            if self.config.rollout.mode == "sync":
+                # Use the project wrapper for every synchronous algorithm
+                # (Search-R1, SSP, and KG).  The wrapper delegates to verl's
+                # engine and keeps this worker's sharding/sync contract.
+                from quarl.worker.rollout.vllm_rollout import vLLMRollout
+
+                vllm_rollout_cls = vLLMRollout
+            else:
+                vllm_rollout_cls = vLLMAsyncRollout
             rollout = vllm_rollout_cls(
                 model_path=local_path,
                 config=self.config.rollout,

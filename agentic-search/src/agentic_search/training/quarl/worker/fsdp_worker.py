@@ -98,6 +98,30 @@ class SSPActorRolloutRefWorker(ActorRolloutRefWorker):
             )
             log_gpu_memory_usage("After building sharding manager", logger=logger)
 
+        elif rollout_name == "vllm":
+            from quarl.worker.rollout.vllm_rollout import vLLMRollout
+            from verl.workers.sharding_manager.fsdp_vllm import FSDPVLLMShardingManager
+
+            local_path = copy_to_local(self.config.model.path)
+            log_gpu_memory_usage("Before building vLLM rollout", logger=logger)
+            rollout = vLLMRollout(
+                model_path=local_path,
+                config=self.config.rollout,
+                tokenizer=self.tokenizer,
+                model_hf_config=self.actor_model_config,
+                trust_remote_code=trust_remote_code,
+            )
+            rollout_sharding_manager = FSDPVLLMShardingManager(
+                module=self.actor_module_fsdp,
+                inference_engine=rollout.inference_engine,
+                model_config=self.actor_model_config,
+                rollout_config=self.config.rollout,
+                full_params="hf" in self.config.rollout.load_format,
+                device_mesh=rollout_device_mesh,
+                offload_param=self._is_offload_param,
+            )
+            log_gpu_memory_usage("After building vLLM rollout", logger=logger)
+
         else:
             raise NotImplementedError(f"Rollout name: {self.config.rollout.name} is not supported")
 

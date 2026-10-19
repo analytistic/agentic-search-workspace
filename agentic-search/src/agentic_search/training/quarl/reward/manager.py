@@ -31,6 +31,7 @@ from quarl.interface import RewardFuncInfo
 register_ray()
 
 
+
 class SSPRewardManager:
     """The reward manager."""
 

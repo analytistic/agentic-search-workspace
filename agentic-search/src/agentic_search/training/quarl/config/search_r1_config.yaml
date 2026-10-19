@@ -1,0 +1,84 @@
+hydra:
+  searchpath:
+    - file://${oc.env:WORKSPACE,./}/verl/verl/trainer/config
+
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+algorithm:
+  name: search_r1
+  rollout_format: hermes
+  chat_template: default
+  adv_estimator: grpo
+
+reward_model:
+  model:
+    type: naive
+  reward_manager: search_r1
+
+custom_reward_functions:
+  qa_em:
+    labels:
+      - unknown
+    integration: sum
+    kwargs:
+      think_only: true
+      max_search_calls: 10
+      max_response_tokens: 8192
+      think_length_penalty_beta: 0.0
+
+# Search-R1 uses verl's default data-source reward routing. For searchR1_*
+# sources this resolves to search_r1_like_qa_em (exact-match reward).
+
+actor_rollout_ref:
+  rollout:
+    name: vllm
+    multi_turn:
+      max_assistant_turns: 10 # maximum assistant turns
+      format: hermes
+      enable: true # enable multi-turn rollout
+      use_inference_chat_template: false # use inference chat template
+      tokenization_sanity_check_mode: disable # disable tokenization sanity check
+      tool_config_path: null # tool config path
+
+
+
+diff_val_reward_fn_config:
+  reward_model:
+    reward_manager: naive_with_prompt
+  data:
+    reward_fn_key: data_source
+  custom_reward_function:
+    path: quarl/reward/score/search_eval_score.py
+    name: compute_score
+
+
+# Search_R1 specific configuration
+search_r1:
+  
+  enable: false
+  lang: zh # zh or en
+  save_freq: 5
+  validate_config: true # whether to validate config in RayPPOTrainer
+  
+  mini_epochs: 1 # number of mini-epochs per training iteration
+  answer_pattern: "answer" # pattern to extract from generation output, "answer" or "question"
+  
+    
+  # Solving phase settings (solver)  
+  solver:
+    enable: true
+    do_sample: true
+    temperature: 1
+
+  
+  # Reward-based dynamic sampling configuration
+  # When enabled, will filter out proposer groups with zero reward variance and their corresponding solver trajectories
+  # This helps ensure training data has sufficient reward diversity
+  reward_dynamic_sampling:
+    enable: false # Enable reward-based dynamic sampling
+    metric: "seq_final_reward" # Metric to use for filtering: "seq_final_reward" or "seq_reward"
+    max_num_gen_batches: 30 # Maximum number of generation batches to use for filtering
+  
