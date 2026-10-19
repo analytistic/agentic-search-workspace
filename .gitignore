@@ -14,6 +14,9 @@ data/**/raw/
 # Local test fixture — stays on disk, never tracked.
 data/wiki-demo/
 
+# Local reference clone of Search-R1 — kept on disk, not tracked.
+third_party/Search-R1/
+
 # Local Python tooling.
 .venv/
 __pycache__/
