@@ -20,9 +20,6 @@ export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searc
 # python for training (server env; local: uv run --project agentic-search)
 PYTHON="python3"
 
-# tool config template (class_name: quarl SSPSearchTool)
-TOOL_CONFIG_TEMPLATE="$REPO_ROOT/third_party/Knowledge-Graph-Paths-as-Intermediate-Supervision-for-Self-Evolving-Search-Agents/training/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml"
-
 # ---- model / data ----
 MODEL_PATH="/data/models/Qwen2.5-7B-Instruct"
 DATA_PATH="/data/search-r1/train"        # parquet without suffix
@@ -80,11 +77,7 @@ export PYTHONPATH="$TRAINING_DIR/verl:$TRAINING_DIR/quarl"
 
 mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
-# tool config: copy template and point the wiki URL at the retrieval service
-TOOL_CONFIG="$OUTPUT_DIR/logs/search_tool_config_rank${RANK}.yaml"
-cp "$TOOL_CONFIG_TEMPLATE" "$TOOL_CONFIG"
-sed -i "/wiki:/s|http://[0-9.]\+:${SEARCH_PORT}/retrieve|http://${SEARCH_IP}:${SEARCH_PORT}/retrieve|" "$TOOL_CONFIG"
-echo "Tool config: $TOOL_CONFIG (wiki -> http://${SEARCH_IP}:${SEARCH_PORT}/retrieve)"
+# retriever URL is injected at launch (Search-R1 trainer reads config.retriever.url)
 
 # ---- retrieval service (CPU: no --faiss_gpu) ----
 start_retriever() {
@@ -144,11 +137,9 @@ if [ "$RANK" -eq 0 ]; then
         actor_rollout_ref.rollout.max_num_batched_tokens="$PPO_MAX_TOKEN_LEN_PER_GPU" \
         actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \
         actor_rollout_ref.rollout.n="$ROLLOUT_N" \
-        actor_rollout_ref.rollout.multi_turn.enable=True \
-        actor_rollout_ref.rollout.multi_turn.format=hermes \
-        actor_rollout_ref.rollout.multi_turn.max_assistant_turns="$MAX_TURNS" \
-        actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG" \
         actor_rollout_ref.hybrid_engine=True \
+        retriever.url="http://${SEARCH_IP}:${SEARCH_PORT}/retrieve" \
+        retriever.topk="$RETRIEVER_TOPK" \
         reward_model.reward_manager=search_r1 \
         trainer.project_name=searchr1_grpo \
         trainer.experiment_name=searchr1_grpo \

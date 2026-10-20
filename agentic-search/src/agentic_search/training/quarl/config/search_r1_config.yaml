@@ -29,6 +29,25 @@ custom_reward_functions:
       max_response_tokens: 8192
       think_length_penalty_beta: 0.0
 
+# Search-R1 trainer reads retriever.url for its batch_search calls
+# (launch script overrides url with the real SEARCH_IP).
+retriever:
+  url: "http://localhost:8000/retrieve"
+  topk: 3
+
+# ---- agent loop (LLMGenerationManager / trainer reads these directly) ----
+max_turns: 10              # agent loop turn limit
+max_start_length: 4096     # start-prompt truncation (= max_prompt_length)
+max_obs_length: 512        # observation truncation (search result text cap)
+num_gpus: 8                # generation chunking (= trainer.n_gpus_per_node)
+no_think_rl: false         # include <think> in RL (official default false)
+do_search: true            # enable searching (core Search-R1 switch)
+pad_token_id: 151643       # Qwen2.5 tokenizer pad id (change per model)
+
+data:
+  max_start_length: 4096
+  dataloader_num_workers: 4
+
 # Search-R1 uses verl's default data-source reward routing. For searchR1_*
 # sources this resolves to search_r1_like_qa_em (exact-match reward).
 
