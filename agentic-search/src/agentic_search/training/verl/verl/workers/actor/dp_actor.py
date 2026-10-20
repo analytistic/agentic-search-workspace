@@ -40,7 +40,19 @@ from verl.workers.config import ActorConfig
 if is_cuda_available:
     from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
 elif is_npu_available:
-    from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, rearrange, unpad_input
+    try:
+        from transformers.integrations.npu_flash_attention import (
+            index_first_axis, pad_input, rearrange, unpad_input,
+        )
+    except ImportError:
+        # transformers >= 5.x: helpers moved to modeling_flash_attention_utils
+        # with private names; rearrange comes from einops.
+        from einops import rearrange
+        from transformers.modeling_flash_attention_utils import (
+            _index_first_axis as index_first_axis,
+            _pad_input as pad_input,
+            _unpad_input as unpad_input,
+        )
 
 
 __all__ = ["DataParallelPPOActor"]

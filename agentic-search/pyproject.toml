@@ -24,8 +24,12 @@ retrieval-gpu = ["faiss-gpu>=1.7.4"]
 
 training-npu = [
     "torch==2.10.0",
+    # 4.52.4 = last transformers exporting the npu_flash_attention helpers
+    # verl imports (index_first_axis/pad_input/unpad_input/rearrange);
+    # 5.x removed them
     "transformers==5.5.4",
     "ray==2.48.0",
+    "einops",   # rearrange for the 5.x npu flash attention fallback path
     # triton-ascend bundles triton for NPU; installing triton separately
     # overwrites files — install triton-ascend only
     # "triton-ascend==3.2.2 ; sys_platform == 'linux'",
