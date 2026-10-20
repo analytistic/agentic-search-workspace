@@ -83,9 +83,19 @@ mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 # ---- retrieval service (CPU: no --faiss_gpu) ----
 start_retriever() {
     local log="$OUTPUT_DIR/logs/retriever_rank0.log"
-    # kill stale retriever instances holding SEARCH_PORT (survive script exit)
-    pkill -f "retrieval_server.py" 2>/dev/null || true
-    sleep 1
+    # Kill stale retriever instances (SIGKILL; SIGTERM may not die fast enough).
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -ti:"$SEARCH_PORT" | xargs -r kill -9 2>/dev/null || true
+    else
+        pkill -9 -f "retrieval_server.py" 2>/dev/null || true
+    fi
+    # Wait until the port is actually released (max 10s).
+    for _ in $(seq 1 10); do
+        if command -v lsof >/dev/null 2>&1 && ! lsof -ti:"$SEARCH_PORT" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
     echo "==> starting retrieval service (CPU mode)"
     OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
         --index_path "$RETRIEVER_INDEX_PATH" \
