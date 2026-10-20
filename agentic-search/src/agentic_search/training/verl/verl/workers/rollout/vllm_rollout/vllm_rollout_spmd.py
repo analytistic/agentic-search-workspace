@@ -46,18 +46,11 @@ from filelock import FileLock
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from tensordict import TensorDict
 from vllm import LLM, SamplingParams
-try:
-    # vLLM >= 0.9: CompilationLevel replaced by CompilationMode + CUDAGraphMode
-    from vllm.config import CompilationConfig, CompilationMode, CUDAGraphMode
-
-    _NEW_VLLM_CONFIG = True
-except ImportError:
-    from vllm.config import CompilationConfig, CompilationLevel  # old vLLM
-
-    _NEW_VLLM_CONFIG = False
+from vllm.config import CompilationConfig, CompilationLevel
 from vllm.distributed import parallel_state as vllm_ps
 from vllm.lora.request import LoRARequest
-from vllm.v1.worker.worker_base import WorkerWrapperBase
+from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.worker.worker_base import WorkerWrapperBase
 
 from verl import DataProto
 from verl.utils.profiler import GPUMemoryLogger
@@ -169,18 +162,6 @@ class vLLMRollout(BaseRollout):
         #    (which can vary across different vLLM versions);
         # - Otherwise it's the desired value we want to explicitly set.
         engine_kwargs = {key: val for key, val in engine_kwargs.items() if val is not None}
-        # vLLM removed some EngineArgs fields across versions (e.g.
-        # disable_mm_preprocessor_cache in 0.23); drop unknown keys instead
-        # of passing them through and crashing the engine init.
-        from dataclasses import fields
-
-        from vllm.engine.arg_utils import EngineArgs
-
-        _engine_arg_fields = {f.name for f in fields(EngineArgs)}
-        dropped = [k for k in engine_kwargs if k not in _engine_arg_fields]
-        if dropped:
-            logger.warning(f"vLLM EngineArgs has no field(s) {dropped}; dropping them")
-            engine_kwargs = {k: v for k, v in engine_kwargs.items() if k in _engine_arg_fields}
         if config.get("limit_images", None):  # support for multi-image data
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.get("limit_images")}
 
@@ -190,16 +171,9 @@ class vLLMRollout(BaseRollout):
         # enforce_eager must be False to use cudagraph
         if not config.enforce_eager and cudagraph_capture_sizes:
             if isinstance(cudagraph_capture_sizes, ListConfig):
-                if _NEW_VLLM_CONFIG:
-                    compilation_config["compilation_config"] = CompilationConfig(
-                        mode=CompilationMode.VLLM_COMPILE,
-                        cudagraph_mode=CUDAGraphMode.PIECEWISE,
-                        cudagraph_capture_sizes=cudagraph_capture_sizes,
-                    )
-                else:
-                    compilation_config["compilation_config"] = CompilationConfig(
-                        level=CompilationLevel.PIECEWISE, cudagraph_capture_sizes=cudagraph_capture_sizes
-                    )
+                compilation_config["compilation_config"] = CompilationConfig(
+                    level=CompilationLevel.PIECEWISE, cudagraph_capture_sizes=cudagraph_capture_sizes
+                )
             else:
                 logger.warning(f"cudagraph_capture_sizes must be a list, but got {cudagraph_capture_sizes}")
 
@@ -430,8 +404,12 @@ class vLLMRollout(BaseRollout):
 def _monkey_patch_compute_logits(model, vocab_size: int):
     original_compute_logits = model.compute_logits
 
-    def compute_logits(self, hidden_states, *args, **kwargs):
-        logits = original_compute_logits(hidden_states, *args, **kwargs)
+    def compute_logits(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> torch.Tensor:
+        logits = original_compute_logits(hidden_states, sampling_metadata)
         logits[..., vocab_size:] = float("-inf")
         return logits
 

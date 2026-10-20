@@ -22,22 +22,17 @@ from omegaconf import DictConfig, ListConfig
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 from vllm import SamplingParams
-from vllm.config import CompilationConfig, CompilationMode, CUDAGraphMode
+from vllm.config import CompilationConfig, CompilationLevel
 from vllm.engine.arg_utils import AsyncEngineArgs
-# vLLM 0.23: entrypoints moved under serve/ and chat_completion/
-from vllm.entrypoints.serve.utils.request_logger import RequestLogger
-from vllm.entrypoints.openai.chat_completion.protocol import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-)
-from vllm.entrypoints.openai.chat_completion.api_router import ErrorResponse
-from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
-from vllm.entrypoints.openai.api_server import BaseModelPath, OpenAIServingModels
+from vllm.entrypoints.logger import RequestLogger
+from vllm.entrypoints.openai.protocol import ChatCompletionRequest, ChatCompletionResponse, ErrorResponse
+from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
+from vllm.entrypoints.openai.serving_models import BaseModelPath, OpenAIServingModels
 from vllm.inputs import TokensPrompt
 from vllm.outputs import RequestOutput
 from vllm.v1.engine.async_llm import AsyncLLM
 from vllm.v1.executor.abstract import Executor
-from vllm.v1.worker.worker_base import WorkerWrapperBase
+from vllm.worker.worker_base import WorkerWrapperBase
 
 from verl.utils.fs import copy_to_local
 from verl.workers.rollout.async_server import AsyncServerBase
@@ -254,9 +249,7 @@ class AsyncvLLMServer(AsyncServerBase):
         if not config.enforce_eager and cudagraph_capture_sizes:
             if isinstance(cudagraph_capture_sizes, ListConfig):
                 compilation_config["compilation_config"] = CompilationConfig(
-                    mode=CompilationMode.VLLM_COMPILE,
-                    cudagraph_mode=CUDAGraphMode.PIECEWISE,
-                    cudagraph_capture_sizes=cudagraph_capture_sizes,
+                    level=CompilationLevel.PIECEWISE, cudagraph_capture_sizes=cudagraph_capture_sizes
                 )
             else:
                 logger.warning(f"cudagraph_capture_sizes must be a list, but got {cudagraph_capture_sizes}")
