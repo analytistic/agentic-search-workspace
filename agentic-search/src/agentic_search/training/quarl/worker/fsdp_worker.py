@@ -99,7 +99,7 @@ class SSPActorRolloutRefWorker(ActorRolloutRefWorker):
             log_gpu_memory_usage("After building sharding manager", logger=logger)
 
         elif rollout_name == "vllm":
-            from verl.worker.rollout.vllm_rollout import vLLMRollout
+            from verl.workers.rollout.vllm_rollout.vllm_rollout_spmd import vLLMRollout
             from verl.workers.sharding_manager.fsdp_vllm import FSDPVLLMShardingManager
 
             local_path = copy_to_local(self.config.model.path)

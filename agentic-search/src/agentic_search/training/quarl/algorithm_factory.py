@@ -98,12 +98,12 @@ def get_role_worker_mapping(config):
 def get_resource_pool_manager(config):
     """Select the Ray worker-group implementation from actor strategy."""
     from verl.single_controller.ray import RayWorkerGroup
-    from verl.single_controller.ray.megatron import NVMegatronRayWorkerGroup
+    # from verl.single_controller.ray.megatron import NVMegatronRayWorkerGroup
 
     worker_group_registry = {
         "fsdp": RayWorkerGroup,
         "fsdp2": RayWorkerGroup,
-        "megatron": NVMegatronRayWorkerGroup,
+        # "megatron": NVMegatronRayWorkerGroup,
     }
     strategy = config.actor_rollout_ref.actor.strategy
     try:

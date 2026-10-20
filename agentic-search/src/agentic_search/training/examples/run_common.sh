@@ -323,7 +323,6 @@ if [ "$NODE_RANK" -eq 0 ]; then
     fi
 
     python3 -m quarl.main_rl \
-        task_type=$TASK_TYPE \
         algorithm.adv_estimator=${ADV_ESTIMATOR} \
         data.train_files=${TRAIN_FILES_STR} \
         data.val_files=${TEST_FILES_STR} \
