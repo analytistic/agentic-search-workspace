@@ -57,7 +57,7 @@ except ImportError:
     _NEW_VLLM_CONFIG = False
 from vllm.distributed import parallel_state as vllm_ps
 from vllm.lora.request import LoRARequest
-from vllm.worker.worker_base import WorkerWrapperBase
+from vllm.v1.worker.worker_base import WorkerWrapperBase
 
 from verl import DataProto
 from verl.utils.profiler import GPUMemoryLogger
@@ -418,12 +418,8 @@ class vLLMRollout(BaseRollout):
 def _monkey_patch_compute_logits(model, vocab_size: int):
     original_compute_logits = model.compute_logits
 
-    def compute_logits(
-        self,
-        hidden_states: torch.Tensor,
-        sampling_metadata,
-    ) -> torch.Tensor:
-        logits = original_compute_logits(hidden_states, sampling_metadata)
+    def compute_logits(self, hidden_states, *args, **kwargs):
+        logits = original_compute_logits(hidden_states, *args, **kwargs)
         logits[..., vocab_size:] = float("-inf")
         return logits
 
