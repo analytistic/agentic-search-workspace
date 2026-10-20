@@ -46,7 +46,15 @@ from filelock import FileLock
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from tensordict import TensorDict
 from vllm import LLM, SamplingParams
-from vllm.config import CompilationConfig, CompilationLevel
+try:
+    # vLLM >= 0.9: CompilationLevel replaced by CompilationMode + CUDAGraphMode
+    from vllm.config import CompilationConfig, CompilationMode, CUDAGraphMode
+
+    _NEW_VLLM_CONFIG = True
+except ImportError:
+    from vllm.config import CompilationConfig, CompilationLevel  # old vLLM
+
+    _NEW_VLLM_CONFIG = False
 from vllm.distributed import parallel_state as vllm_ps
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.sampling_metadata import SamplingMetadata
@@ -171,9 +179,16 @@ class vLLMRollout(BaseRollout):
         # enforce_eager must be False to use cudagraph
         if not config.enforce_eager and cudagraph_capture_sizes:
             if isinstance(cudagraph_capture_sizes, ListConfig):
-                compilation_config["compilation_config"] = CompilationConfig(
-                    level=CompilationLevel.PIECEWISE, cudagraph_capture_sizes=cudagraph_capture_sizes
-                )
+                if _NEW_VLLM_CONFIG:
+                    compilation_config["compilation_config"] = CompilationConfig(
+                        mode=CompilationMode.VLLM_COMPILE,
+                        cudagraph_mode=CUDAGraphMode.PIECEWISE,
+                        cudagraph_capture_sizes=cudagraph_capture_sizes,
+                    )
+                else:
+                    compilation_config["compilation_config"] = CompilationConfig(
+                        level=CompilationLevel.PIECEWISE, cudagraph_capture_sizes=cudagraph_capture_sizes
+                    )
             else:
                 logger.warning(f"cudagraph_capture_sizes must be a list, but got {cudagraph_capture_sizes}")
 
