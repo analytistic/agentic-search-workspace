@@ -55,6 +55,8 @@ data:
 # sources this resolves to search_r1_like_qa_em (exact-match reward).
 
 actor_rollout_ref:
+  actor:
+    ppo_micro_batch_size_per_gpu: 1   # required when use_dynamic_bsz=False
   rollout:
     name: vllm
     multi_turn:
