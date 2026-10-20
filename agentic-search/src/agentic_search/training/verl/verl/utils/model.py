@@ -621,7 +621,12 @@ def patch_valuehead_model(model) -> None:
 
 
 def load_valuehead_model(local_path, torch_dtype, model_config, trust_remote_code):
-    from transformers import AutoModelForCausalLM, AutoModelForTokenClassification, AutoModelForVision2Seq
+    try:
+        from transformers import AutoModelForCausalLM, AutoModelForTokenClassification, AutoModelForVision2Seq
+    except ImportError:
+        # transformers >= 5.x renamed AutoModelForVision2Seq
+        from transformers import AutoModelForCausalLM, AutoModelForTokenClassification
+        from transformers.models.auto.modeling_auto import AutoModelForImageTextToText as AutoModelForVision2Seq
 
     try:
         model = AutoModelForTokenClassification.from_pretrained(
