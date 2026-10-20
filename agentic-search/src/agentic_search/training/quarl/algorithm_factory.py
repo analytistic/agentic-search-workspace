@@ -36,7 +36,6 @@ def get_role_worker_mapping(config):
         AsyncActorRolloutRefWorker as FSDPAsyncActorRolloutRefWorker,
     )
     from quarl.worker.fsdp_worker import SSPActorRolloutRefWorker
-    from verl.workers.megatron_workers import ActorRolloutRefWorker as MegatronActorRolloutRefWorker
 
     strategy = config.actor_rollout_ref.actor.strategy
     actor_worker_registry = {
@@ -46,16 +45,19 @@ def get_role_worker_mapping(config):
         ("fsdp2", "search_r1"): FSDPActorRolloutRefWorker,
         ("fsdp2", "ssp"): SSPActorRolloutRefWorker,
         ("fsdp2", "kg_self_play"): SSPActorRolloutRefWorker,
-        ("megatron", "search_r1"): MegatronActorRolloutRefWorker,
-        ("megatron", "ssp"): MegatronActorRolloutRefWorker,
-        ("megatron", "kg_self_play"): MegatronActorRolloutRefWorker,
     }
     algorithm_name = config.get("algorithm", {}).get("name", "search_r1")
     registry_key = (strategy, algorithm_name)
     try:
         actor_rollout_cls = actor_worker_registry[registry_key]
     except KeyError as exc:
-        raise ValueError(f"Unsupported actor strategy/algorithm: {registry_key}") from exc
+        if strategy == "megatron":
+            # megatron workers imported lazily (unused in fsdp configs)
+            from verl.workers.megatron_workers import ActorRolloutRefWorker as MegatronActorRolloutRefWorker
+
+            actor_rollout_cls = MegatronActorRolloutRefWorker
+        else:
+            raise ValueError(f"Unsupported actor strategy/algorithm: {registry_key}") from exc
 
     if strategy in ["fsdp", "fsdp2"]:
         from verl.workers.fsdp_workers import CriticWorker
