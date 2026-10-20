@@ -83,6 +83,9 @@ mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 # ---- retrieval service (CPU: no --faiss_gpu) ----
 start_retriever() {
     local log="$OUTPUT_DIR/logs/retriever_rank0.log"
+    # kill stale retriever instances holding SEARCH_PORT (survive script exit)
+    pkill -f "retrieval_server.py" 2>/dev/null || true
+    sleep 1
     echo "==> starting retrieval service (CPU mode)"
     OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
         --index_path "$RETRIEVER_INDEX_PATH" \
