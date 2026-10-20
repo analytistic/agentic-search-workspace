@@ -4,6 +4,3 @@
 [submodule "third_party/Knowledge-Graph-Paths-as-Intermediate-Supervision-for-Self-Evolving-Search-Agents"]
 	path = third_party/Knowledge-Graph-Paths-as-Intermediate-Supervision-for-Self-Evolving-Search-Agents
 	url = https://github.com/528why/Knowledge-Graph-Paths-as-Intermediate-Supervision-for-Self-Evolving-Search-Agents.git
-[submodule "agentic-search/src/agentic_search/training/verl"]
-	path = agentic-search/src/agentic_search/training/verl
-	url = https://github.com/volcengine/verl.git
