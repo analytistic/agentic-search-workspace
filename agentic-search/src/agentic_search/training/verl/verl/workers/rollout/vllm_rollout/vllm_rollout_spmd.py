@@ -169,6 +169,18 @@ class vLLMRollout(BaseRollout):
         #    (which can vary across different vLLM versions);
         # - Otherwise it's the desired value we want to explicitly set.
         engine_kwargs = {key: val for key, val in engine_kwargs.items() if val is not None}
+        # vLLM removed some EngineArgs fields across versions (e.g.
+        # disable_mm_preprocessor_cache in 0.23); drop unknown keys instead
+        # of passing them through and crashing the engine init.
+        from dataclasses import fields
+
+        from vllm.engine.arg_utils import EngineArgs
+
+        _engine_arg_fields = {f.name for f in fields(EngineArgs)}
+        dropped = [k for k in engine_kwargs if k not in _engine_arg_fields]
+        if dropped:
+            logger.warning(f"vLLM EngineArgs has no field(s) {dropped}; dropping them")
+            engine_kwargs = {k: v for k, v in engine_kwargs.items() if k in _engine_arg_fields}
         if config.get("limit_images", None):  # support for multi-image data
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.get("limit_images")}
 
