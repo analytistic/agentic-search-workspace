@@ -135,6 +135,7 @@ if [ "$RANK" -eq 0 ]; then
         retriever.url="http://${SEARCH_IP}:${SEARCH_PORT}/retrieve" \
         retriever.topk="$RETRIEVER_TOPK" \
         reward_model.reward_manager=search_r1 \
+        diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_eval_score.py" \
         trainer.project_name=searchr1_grpo \
         trainer.experiment_name=searchr1_grpo \
         trainer.val_before_train=True \
