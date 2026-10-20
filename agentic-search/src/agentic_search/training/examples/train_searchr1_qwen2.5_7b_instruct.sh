@@ -112,13 +112,13 @@ fi
 
 # ---- Ray cluster ----
 ray stop || true
-# --num-gpus: register NPUs as GPU resources (Ray detects Ascend NPUs as
-# "NPU" resources, but verl workers request "GPU").
+# Ray natively detects Ascend NPUs as "NPU" resources; verl requests them
+# when trainer.device=npu (see launch args). No --num-gpus needed.
 if [ "$RANK" -eq 0 ]; then
-    ray start --block --head --node-ip-address="$NODE_IP" --port="$MASTER_PORT" --num-gpus="$N_GPUS_PER_NODE" &
+    ray start --block --head --node-ip-address="$NODE_IP" --port="$MASTER_PORT" &
     if [ "$NNODES" -gt 1 ]; then sleep 120; fi
 else
-    ray start --block --node-ip-address="$NODE_IP" --address="${MASTER_ADDR}:${MASTER_PORT}" --num-gpus="$N_GPUS_PER_NODE"
+    ray start --block --node-ip-address="$NODE_IP" --address="${MASTER_ADDR}:${MASTER_PORT}"
 fi
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 # ---- launch training ----

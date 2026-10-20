@@ -7,6 +7,9 @@ defaults:
   - ppo_trainer
   - _self_
 
+trainer:
+  device: npu              # Ascend: verl requests "NPU" Ray resources
+
 algorithm:
   name: search_r1
   rollout_format: hermes
