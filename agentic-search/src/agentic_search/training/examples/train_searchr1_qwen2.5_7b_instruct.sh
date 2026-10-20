@@ -20,9 +20,6 @@ export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searc
 # python for training (server env; local: uv run --project agentic-search)
 PYTHON="python3"
 
-# Search-R1 clone (trainer imports search_r1.llm_agent.generation)
-SEARCH_R1_PATH="$REPO_ROOT/third_party/Search-R1"
-
 # tool config template (class_name: quarl SSPSearchTool)
 TOOL_CONFIG_TEMPLATE="$REPO_ROOT/third_party/Knowledge-Graph-Paths-as-Intermediate-Supervision-for-Self-Evolving-Search-Agents/training/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml"
 
@@ -80,12 +77,6 @@ VAL_ONLY="${VAL_ONLY:-False}"
 PPO_MAX_TOKEN_LEN_PER_GPU=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))
 export ASCEND_VISIBLE_DEVICES
 export PYTHONPATH="$TRAINING_DIR/verl:$TRAINING_DIR/quarl"
-if [ -n "$SEARCH_R1_PATH" ] && [ -d "$SEARCH_R1_PATH" ]; then
-    export PYTHONPATH="$PYTHONPATH:$SEARCH_R1_PATH"
-    echo "PYTHONPATH includes Search-R1: $SEARCH_R1_PATH"
-else
-    echo "WARNING: SEARCH_R1_PATH not found — trainer import search_r1.llm_agent will fail"
-fi
 
 mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
