@@ -39,7 +39,7 @@ retriever:
 max_turns: 10              # agent loop turn limit
 max_start_length: 4096     # start-prompt truncation (= max_prompt_length)
 max_obs_length: 512        # observation truncation (search result text cap)
-num_gpus: 8                # generation chunking (= trainer.n_gpus_per_node)
+num_gpus: 4                # generation chunking (= trainer.n_gpus_per_node)
 no_think_rl: false         # include <think> in RL (official default false)
 do_search: true            # enable searching (core Search-R1 switch)
 pad_token_id: 151643       # Qwen2.5 tokenizer pad id (change per model)

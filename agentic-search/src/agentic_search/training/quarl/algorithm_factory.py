@@ -114,6 +114,8 @@ def get_resource_pool_manager(config):
 
 def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
     """Create the RL dataset and apply algorithm-specific chat templates."""
+    import os
+    import pandas as pd
     from verl.utils import hf_processor, hf_tokenizer
     from verl.utils.dataset.rl_dataset import RLHFDataset
     from verl.utils.fs import copy_to_local
@@ -125,6 +127,18 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         tokenizer = hf_tokenizer(local_path, trust_remote_code=trust_remote_code)
     if processor is None:
         processor = hf_processor(local_path, use_fast=True)
+
+    # RLHFDataset needs parquet; convert .jsonl inputs to .parquet on demand.
+    converted = []
+    for p in [str(x) for x in data_paths]:
+        if p.endswith(".jsonl"):
+            pq_path = p[: -len(".jsonl")] + ".parquet"
+            if not os.path.exists(pq_path):
+                print(f"[create_rl_dataset] converting {p} -> {pq_path}")
+                pd.read_json(p, lines=True).to_parquet(pq_path)
+            converted.append(pq_path)
+        else:
+            converted.append(p)
 
     from quarl.utils.chat_template import SearchChatTemplate as QSCT
     from quarl.utils.patch.chat_template import switch_apply_chat_template
@@ -142,7 +156,7 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
     dataset_cls = RLHFDataset
     print(f"Using dataset class: {dataset_cls.__name__}")
     return dataset_cls(
-        data_files=data_paths,
+        data_files=converted,
         tokenizer=tokenizer,
         processor=processor,
         config=config.data,

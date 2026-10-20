@@ -13,7 +13,7 @@ set -euo pipefail
 # ========================== CONFIG ==========================
 
 # ---- paths ----
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+REPO_ROOT="/home/xuwentao/agentic-search-workspace"
 TRAINING_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training"
 export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searchpath
 
@@ -22,8 +22,8 @@ PYTHON="python3"
 
 # ---- model / data ----
 MODEL_PATH="/data/models/Qwen2.5-7B-Instruct"
-DATA_PATH="/data/search-r1/train"        # parquet without suffix
-TEST_DATA_PATH="/data/search-r1/test"
+DATA_PATH="/data/xuwentao_data/search_r1/train.parquet"        # parquet without suffix
+TEST_DATA_PATH="/data/xuwentao_data/ssp/test.jsonl"
 
 # ---- output ----
 OUTPUT_ROOT="${OUTPUT_ROOT:-./output}"
@@ -37,21 +37,21 @@ NNODES="${NNODES:-1}"
 RANK="${RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-localhost}"
 MASTER_PORT="${MASTER_PORT:-6379}"
-NODE_IP="${NODE_IP:-$(hostname -I | awk '{print $1}')}"
-SEARCH_IP="${SEARCH_IP:-$NODE_IP}"
+NODE_IP="${NODE_IP:-127.0.0.1}"
+SEARCH_IP="${SEARCH_IP:-127.0.0.1}"
 
 # ---- retrieval service (CPU mode on Ascend) ----
 RETRIEVER_ENABLE="${RETRIEVER_ENABLE:-1}"
 RETRIEVER_SERVER="$TRAINING_DIR/examples/retrieval/retrieval_server.py"
-RETRIEVER_INDEX_PATH="/data/wiki/index/e5_HNSW64.index"
-RETRIEVER_CORPUS_PATH="/data/wiki/corpus/wiki-18.jsonl"
-RETRIEVER_MODEL_PATH="/data/wiki/model/intfloat/e5-base-v2"
+RETRIEVER_INDEX_PATH="/data/xuwentao_data/wiki_2018/index/wiki-18-e5-index/e5_Flat.index"
+RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/corpus/wiki_dump.jsonl"
+RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
 SEARCH_PORT="${SEARCH_PORT:-8000}"
 
 # ---- Ascend ----
-ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-6,7}"
-N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-2}"
+ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-6,7,14,15}"
+N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-4}"
 
 # ---- training hyperparams ----
 BATCH_SIZE="${BATCH_SIZE:-256}"
@@ -73,7 +73,6 @@ VAL_ONLY="${VAL_ONLY:-False}"
 
 PPO_MAX_TOKEN_LEN_PER_GPU=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))
 export ASCEND_VISIBLE_DEVICES
-export PYTHONPATH="$TRAINING_DIR/verl:$TRAINING_DIR/quarl"
 
 mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
@@ -89,15 +88,7 @@ start_retriever() {
         --topk "$RETRIEVER_TOPK" \
         --retriever_name e5 \
         --retriever_model "$RETRIEVER_MODEL_PATH" > "$log" 2>&1 &
-    for _ in $(seq 1 600); do
-        if curl -fsS -o /dev/null "http://localhost:${SEARCH_PORT}/status" 2>/dev/null; then
-            echo "    retrieval ready"
-            return 0
-        fi
-        sleep 1
-    done
-    echo "    retrieval NOT ready; log tail:"; tail -5 "$log"
-    return 1
+    return 0
 }
 
 if [ "$RANK" -eq 0 ] && [ "$RETRIEVER_ENABLE" = "1" ]; then
@@ -111,13 +102,13 @@ if [ "$RANK" -eq 0 ]; then
 else
     ray start --block --node-ip-address="$NODE_IP" --address="${MASTER_ADDR}:${MASTER_PORT}"
 fi
-
+export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 # ---- launch training ----
 if [ "$RANK" -eq 0 ]; then
     "$PYTHON" -m quarl.main_rl \
         --config-name search_r1_config \
-        data.train_files="[\"${DATA_PATH}.parquet\"]" \
-        data.val_files="[\"${TEST_DATA_PATH}.parquet\"]" \
+        data.train_files="[\"${DATA_PATH}\"]" \
+        data.val_files="[\"${TEST_DATA_PATH}\"]" \
         data.train_batch_size="$BATCH_SIZE" \
         data.val_batch_size="$VAL_BATCH_SIZE" \
         data.max_prompt_length="$MAX_PROMPT_LENGTH" \
