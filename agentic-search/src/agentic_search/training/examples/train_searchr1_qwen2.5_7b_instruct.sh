@@ -17,8 +17,10 @@ REPO_ROOT="/home/xuwentao/agentic-search-workspace"
 TRAINING_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training"
 export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searchpath
 
+
 # python for training (server env; local: uv run --project agentic-search)
 PYTHON="python3"
+export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 
 # ---- model / data ----
 MODEL_PATH="/data/models/Qwen2.5-7B-Instruct"
@@ -96,6 +98,7 @@ if [ "$RANK" -eq 0 ] && [ "$RETRIEVER_ENABLE" = "1" ]; then
 fi
 
 # ---- Ray cluster ----
+ray stop || true 
 if [ "$RANK" -eq 0 ]; then
     ray start --block --head --node-ip-address="$NODE_IP" --port="$MASTER_PORT" &
     if [ "$NNODES" -gt 1 ]; then sleep 120; fi
