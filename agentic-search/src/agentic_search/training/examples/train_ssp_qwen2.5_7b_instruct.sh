@@ -3,8 +3,8 @@
 #
 # 1) optional: start retrieval service (CPU mode)
 # 2) start Ray cluster
-# 3) run quarl.main_rl with rl_config.yaml (sglang backend, quark multi-turn
-#    tool format, quark_score reward / naive-with-prompt val reward)
+# 3) run quarl.main_rl with self_play_config.yaml (sglang backend, quark
+#    multi-turn tool format, quark_score reward / naive-with-prompt val reward)
 #
 # Notes:
 # - sglang backend goes through verl FSDPSGLangShardingManager: requires
@@ -19,7 +19,7 @@ set -euo pipefail
 # ---- paths ----
 REPO_ROOT="/home/xuwentao/agentic-search-workspace"
 TRAINING_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training"
-export WORKSPACE="$TRAINING_DIR"     # used by rl_config.yaml hydra searchpath
+export WORKSPACE="$TRAINING_DIR"     # used by self_play_config.yaml hydra searchpath
 
 
 # python for training (server env; local: uv run --project agentic-search)
@@ -148,7 +148,7 @@ export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 # ---- launch training ----
 if [ "$RANK" -eq 0 ]; then
     "$PYTHON" -m quarl.main_rl \
-        --config-name rl_config \
+        --config-name self_play_config \
         quark.task_type="$TASK_TYPE" \
         algorithm.adv_estimator="$ADV_ESTIMATOR" \
         data.train_files="[\"${DATA_PATH}\"]" \
