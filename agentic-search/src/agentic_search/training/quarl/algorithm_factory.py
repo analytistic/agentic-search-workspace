@@ -10,7 +10,7 @@ def get_trainer_class(config):
     """Return the PPO trainer class for an algorithm name."""
     from quarl.trainer.ppo.searchr1_ray_trainer import Searchr1RayPPOTrainer
     from quarl.trainer.ppo.ssp_ray_trainer import SSPRayPPOTrainer
-    algorithm_name = config.get("algorithm", {}).get("name", "search_r1")
+    algorithm_name = _resolve_algorithm_name(config)
     trainer_registry = {
         "search_r1": Searchr1RayPPOTrainer,
         "ssp": SSPRayPPOTrainer,
@@ -46,7 +46,7 @@ def get_role_worker_mapping(config):
         ("fsdp2", "ssp"): SSPActorRolloutRefWorker,
         ("fsdp2", "kg_self_play"): SSPActorRolloutRefWorker,
     }
-    algorithm_name = config.get("algorithm", {}).get("name", "search_r1")
+    algorithm_name = _resolve_algorithm_name(config)
     registry_key = (strategy, algorithm_name)
     try:
         actor_rollout_cls = actor_worker_registry[registry_key]
@@ -112,6 +112,27 @@ def get_resource_pool_manager(config):
         return worker_group_registry[strategy]
     except KeyError as exc:
         raise NotImplementedError(f"Unsupported actor strategy: {strategy}") from exc
+
+
+def _resolve_algorithm_name(config):
+    """Resolve the algorithm name from the top-level ``algorithm.name`` field
+    (local kg/search_r1 configs) or the legacy ``quark.task_type`` namespace
+    used by the upstream SSP config."""
+    name = config.get("algorithm", {}).get("name")
+    if name:
+        return name
+    task_type = config.get("quark", {}).get("task_type", "")
+    if task_type in ("origin", "quark_deep_search"):
+        return "ssp"
+    return "search_r1"
+
+
+def _resolve_diff_val_reward_fn_config(config):
+    """diff_val_reward_fn_config lives at top level in local configs and under
+    ``quark.*`` in the upstream SSP config."""
+    if config.get("diff_val_reward_fn_config"):
+        return config.diff_val_reward_fn_config
+    return config.get("quark", {}).get("diff_val_reward_fn_config")
 
 
 def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
@@ -234,7 +255,7 @@ def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
             reward_fn_key=config.data.reward_fn_key,
             **reward_kwargs,
         )
-    elif reward_manager_name in ["ssp_kg", "search_r1"]:
+    elif reward_manager_name in ["ssp_kg", "search_r1", "ssp"]:
         from quarl.reward import get_custom_reward_fns
         from quarl.reward.manager import SSPRewardManager
 
@@ -281,7 +302,7 @@ def build_trainer(
     }
     ray_worker_group_cls = get_resource_pool_manager(config)
     reward_fn = load_reward_manager(config, tokenizer, num_examine=0, **config.reward_model.get("reward_kwargs", {}))
-    val_reward_fn = load_reward_manager(config.diff_val_reward_fn_config, tokenizer, num_examine=1)
+    val_reward_fn = load_reward_manager(_resolve_diff_val_reward_fn_config(config), tokenizer, num_examine=1)
     resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
     from verl.utils.dataset.rl_dataset import collate_fn

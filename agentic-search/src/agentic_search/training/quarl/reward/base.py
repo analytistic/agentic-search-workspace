@@ -6,11 +6,13 @@ from typing import Dict
 from quarl.interface import RewardFuncInfo
 
 from .score.qa_em import compute_score_batch as reward_qa_em_fn
+from .score.quark_score import compute_score_batch as reward_quark_score_fn
 from .score.process_score import compute_score_batch as reward_process_score_fn
 from .score.outcome_score import compute_score_batch as reward_outcome_score_fn
 
 REWARD_FUNCTIONS = {
     "qa_em": reward_qa_em_fn,
+    "quark_score": reward_quark_score_fn,
     "process_score": reward_process_score_fn,
     "outcome_score": reward_outcome_score_fn,
 }

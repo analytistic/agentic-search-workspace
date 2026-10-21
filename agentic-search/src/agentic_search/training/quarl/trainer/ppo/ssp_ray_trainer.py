@@ -43,7 +43,6 @@ from verl.utils.metric import reduce_metrics
 from verl.utils.model import compute_position_id_with_mask
 from verl.utils.tracking import Tracking
 
-from quarl.utils.process_reward import enrich_extra_info_with_process_reward
 from quarl.utils.ssp_data_manager import SelfPlayPhase, SSPDataManager
 from quarl.utils.problem_extraction import ProblemExtractor, extract_problems_batch
 
@@ -109,19 +108,8 @@ class SSPRayPPOTrainer(RayPPOTrainer):
             noisy_rag_materials=self.sp_config.get("noisy_RAG_materials", 0),
             answer_pattern=self.sp_config.get("answer_pattern", "answer"),
         )
-        self.process_reward_node_filter_mode = self._get_process_reward_node_filter_mode()
 
         self._load_problem_generation_data()
-
-    def _get_process_reward_node_filter_mode(self) -> str:
-        node_filter_mode = OmegaConf.select(
-            self.config,
-            "custom_reward_functions.process_score.kwargs.node_filter_mode",
-            default="none",
-        )
-        if not isinstance(node_filter_mode, str) or not node_filter_mode.strip():
-            return "none"
-        return node_filter_mode.strip().lower()
 
     def _validate_config(self):
         val = self.sp_config.get("validate_config", True)
@@ -265,8 +253,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
 
             test_batch = test_batch.union(test_output_gen_batch)
 
-            # Ensure batch is unlocked before modification
-            test_batch.ensure_unlocked()
             for key in test_batch.batch.keys():
                 if key not in ["old_log_probs", "ref_log_prob"]:
                     test_batch.batch[key] = test_batch.batch[key].long()
@@ -325,15 +311,8 @@ class SSPRayPPOTrainer(RayPPOTrainer):
 
         data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
         metric_dict = {}
-        avg_core_metrics = defaultdict(list)
-        avg_core_metric_var = None
         for data_source, var2metric2val in data_src2var2metric2val.items():
             core_var = "acc" if "acc" in var2metric2val else "reward"
-            aggregate_var = (
-                "reward"
-                if "reward" in var2metric2val
-                else ("acc" if "acc" in var2metric2val else None)
-            )
             for var_name, metric2val in var2metric2val.items():
                 n_max = max([int(name.split("@")[-1].split("/")[0]) for name in metric2val.keys()])
                 for metric_name, metric_val in metric2val.items():
@@ -345,22 +324,8 @@ class SSPRayPPOTrainer(RayPPOTrainer):
                         metric_sec = "val-core"
                     else:
                         metric_sec = "val-aux"
-                    if (
-                        aggregate_var is not None
-                        and var_name == aggregate_var
-                        and metric_name.startswith("mean")
-                        and (f"@{n_max}" in metric_name)
-                    ):
-                        if aggregate_var in {"reward", "acc"}:
-                            avg_core_metrics[metric_name].append(metric_val)
-                            avg_core_metric_var = aggregate_var
                     pfx = f"{metric_sec}/{data_source}/{var_name}/{metric_name}"
                     metric_dict[pfx] = metric_val
-
-        for metric_name, metric_vals in avg_core_metrics.items():
-            if metric_vals:
-                metric_var = avg_core_metric_var or "reward"
-                metric_dict[f"val-core/all_datasets/{metric_var}/{metric_name}"] = float(np.mean(metric_vals))
 
         if len(sample_turns) > 0:
             sample_turns = np.concatenate(sample_turns)
@@ -502,12 +467,7 @@ class SSPRayPPOTrainer(RayPPOTrainer):
                             proposer_rewards, solver_rewards = self._calculate_self_play_rewards(
                                 proposer_gen_batch, solver_gen_batch, timing_raw
                             )
-                            step_metrics.update(getattr(self, "current_solver_process_reward_metrics", {}))
-                            step_metrics.update(getattr(self, "current_proposer_reward_metrics", {}))
 
-                        # Ensure batch is unlocked before modification (may be locked after Ray transfer)
-                        proposer_gen_batch.ensure_unlocked()
-                        solver_gen_batch.ensure_unlocked()
                         proposer_gen_batch.batch["token_level_scores"] = proposer_rewards
                         solver_gen_batch.batch["token_level_scores"] = solver_rewards
 
@@ -936,15 +896,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
             "dynamic_sampling/total_valid_problems": 0,
             "dynamic_sampling/final_valid_count": 0,
         }
-        
-        # Accumulate extraction stats across all dynamic sampling batches
-        accumulated_extraction_stats = {
-            "trajectories_count": 0,
-            "answer_matches_count": 0,
-            "valid_questions_count": 0,
-            "successful_problems_count": 0,
-            "format_error_count": 0,
-        }
 
         current_batch = batch
         batch_count = 0
@@ -958,15 +909,7 @@ class SSPRayPPOTrainer(RayPPOTrainer):
             proposer_gen_batch = self._generate_proposer_trajectories(current_batch, timing_raw)
 
             trajectories = self._extract_trajectories_from_batch(proposer_gen_batch)
-            # Don't record stats yet - we'll accumulate across all batches
-            extracted_problems, batch_extraction_stats = self._extract_and_process_problems(trajectories, record_stats=False)
-            
-            # Accumulate extraction stats
-            accumulated_extraction_stats["trajectories_count"] += batch_extraction_stats["trajectories_count"]
-            accumulated_extraction_stats["answer_matches_count"] += batch_extraction_stats["answer_matches_count"]
-            accumulated_extraction_stats["valid_questions_count"] += batch_extraction_stats["valid_questions_count"]
-            accumulated_extraction_stats["successful_problems_count"] += batch_extraction_stats["successful_problems_count"]
-            accumulated_extraction_stats["format_error_count"] += batch_extraction_stats["format_error_count"]
+            extracted_problems = self._extract_and_process_problems(trajectories)
 
             valid_problems_this_batch = len(extracted_problems)
             total_trajectories_this_batch = len(trajectories)
@@ -1009,31 +952,7 @@ class SSPRayPPOTrainer(RayPPOTrainer):
 
         if len(all_valid_problems) == 0 or len(all_proposer_batches) == 0:
             print("❌ No valid problems found from any batch")
-            # Still record accumulated stats even if no valid problems
-            ray.get(self.sp_data_manager.reset_current_step_stats.remote())
-            ray.get(
-                self.sp_data_manager.record_extraction_stats.remote(
-                    trajectories_count=accumulated_extraction_stats["trajectories_count"],
-                    answer_matches_count=accumulated_extraction_stats["answer_matches_count"],
-                    valid_questions_count=accumulated_extraction_stats["valid_questions_count"],
-                    format_error_count=accumulated_extraction_stats["format_error_count"],
-                    successful_problems_count=accumulated_extraction_stats["successful_problems_count"],
-                )
-            )
             return None, None, sampling_metrics
-
-        # Record accumulated extraction stats for all dynamic sampling batches
-        ray.get(self.sp_data_manager.reset_current_step_stats.remote())
-        ray.get(
-            self.sp_data_manager.record_extraction_stats.remote(
-                trajectories_count=accumulated_extraction_stats["trajectories_count"],
-                answer_matches_count=accumulated_extraction_stats["answer_matches_count"],
-                valid_questions_count=accumulated_extraction_stats["valid_questions_count"],
-                format_error_count=accumulated_extraction_stats["format_error_count"],
-                successful_problems_count=accumulated_extraction_stats["successful_problems_count"],
-            )
-        )
-        print(f"📊 Accumulated extraction stats: {accumulated_extraction_stats}")
 
         final_proposer_batch = self._combine_proposer_batches(all_proposer_batches)
 
@@ -1245,8 +1164,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
 
         batch = batch.union(gen_batch_output)
 
-        # Ensure batch is unlocked before modification
-        batch.ensure_unlocked()
         for key in batch.batch.keys():
             if key not in ["old_log_probs", "ref_log_prob"]:
                 batch.batch[key] = batch.batch[key].long()
@@ -1367,8 +1284,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
         solver_batch = solver_batch.repeat(repeat_times=self.rollout_n, interleave=True)
         solver_batch = solver_batch.union(gen_batch_output)
 
-        # Ensure batch is unlocked before modification
-        solver_batch.ensure_unlocked()
         for key in solver_batch.batch.keys():
             if key not in ["old_log_probs", "ref_log_prob"]:
                 solver_batch.batch[key] = solver_batch.batch[key].long()
@@ -1391,9 +1306,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
                 solver_rewards, solver_extra_infos = ray.get(future_solver_reward)
             else:
                 solver_rewards, solver_extra_infos = compute_reward(solver_gen_batch, self.reward_fn)
-            self.current_solver_process_reward_metrics = self._extract_solver_process_reward_metrics(
-                solver_rewards, solver_extra_infos
-            )
 
         with marked_timer("proposer_reward_computation", timing_raw, color="orange"):
             proposer_rewards = self._compute_proposer_rewards(proposer_gen_batch, solver_rewards, solver_extra_infos)
@@ -1401,62 +1313,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
         print(f"Computed rewards: proposer_mean={proposer_rewards.mean():.3f}, solver_mean={solver_rewards.mean():.3f}")
 
         return proposer_rewards, solver_rewards
-
-    def _extract_solver_answer_correct_tensor(
-        self, solver_rewards: torch.Tensor, solver_extra_infos: Dict[str, List[Any]]
-    ) -> torch.Tensor:
-        answer_correct_key = None
-        if solver_extra_infos:
-            for key in solver_extra_infos.keys():
-                if key.endswith("_answer_correct"):
-                    answer_correct_key = key
-                    break
-
-        if answer_correct_key is not None:
-            answer_corrects = solver_extra_infos[answer_correct_key]
-            assert len(answer_corrects) == solver_rewards.size(
-                0
-            ), f"Expected {solver_rewards.size(0)} answer_correct values, got {len(answer_corrects)}"
-            return torch.tensor(
-                [bool(val) if val is not None else False for val in answer_corrects],
-                dtype=torch.bool,
-                device=solver_rewards.device,
-            )
-
-        # Fallback for reward functions that only expose final binary reward.
-        seq_rewards = solver_rewards.sum(-1)
-        return seq_rewards >= (1.0 - 1e-6)
-
-    def _extract_solver_process_reward_metrics(
-        self, solver_rewards: torch.Tensor, solver_extra_infos: Dict[str, List[Any]]
-    ) -> Dict[str, float]:
-        metrics = {}
-
-        raw_match_rate_key = None
-        if solver_extra_infos:
-            for key in solver_extra_infos.keys():
-                if key.endswith("_raw_match_rate"):
-                    raw_match_rate_key = key
-
-        if raw_match_rate_key is not None:
-            raw_match_rates = [val for val in solver_extra_infos[raw_match_rate_key] if val is not None]
-            if raw_match_rates:
-                metrics["solver/process_reward/raw_match_rate_mean"] = float(np.mean(raw_match_rates))
-
-        seq_rewards = solver_rewards.sum(-1)
-        answer_correct_tensor = self._extract_solver_answer_correct_tensor(solver_rewards, solver_extra_infos)
-        wrong_mask = ~answer_correct_tensor
-        wrong_sample_rewards = seq_rewards[wrong_mask]
-        positive_wrong_mask = wrong_mask & (seq_rewards > 0)
-
-        metrics["solver/final_correct_rate"] = float(answer_correct_tensor.float().mean().item())
-        metrics["solver/process_reward/positive_reward_wrong_rate"] = float(positive_wrong_mask.float().mean().item())
-        metrics["solver/process_reward/positive_reward_wrong_count"] = float(positive_wrong_mask.sum().item())
-
-        if wrong_sample_rewards.numel() > 0:
-            metrics["solver/process_reward/wrong_sample_reward_mean"] = float(wrong_sample_rewards.mean().item())
-
-        return metrics
 
     def _compute_proposer_rewards(
         self, proposer_gen_batch: DataProto, solver_rewards: torch.Tensor, solver_extra_infos: Dict
@@ -1473,9 +1329,8 @@ class SSPRayPPOTrainer(RayPPOTrainer):
         solver_rewards_per_attempt = solver_rewards.sum(-1)
 
         solver_rewards_grouped = solver_rewards_per_attempt.view(proposer_batch_size, solver_n_attempts)
-        answer_correct_tensor = self._extract_solver_answer_correct_tensor(solver_rewards, solver_extra_infos)
-        success_rates = answer_correct_tensor.float().view(proposer_batch_size, solver_n_attempts).mean(dim=1)
-        positive_reward_rates = (solver_rewards_grouped > 0).float().mean(dim=1)
+
+        success_rates = (solver_rewards_grouped > 0).float().mean(dim=1)
 
         reward_type = self.sp_config.get("proposer", {}).get("reward_type", "1-acc")
 
@@ -1539,19 +1394,8 @@ class SSPRayPPOTrainer(RayPPOTrainer):
         if hasattr(self, "current_extraction_success_mask"):
             extraction_failures = sum(1 for x in self.current_extraction_success_mask if not x)
 
-        self.current_proposer_reward_metrics = {
-            "proposer/success_rate_final_correct_mean": float(success_rates.mean().item()),
-            "proposer/success_rate_positive_reward_mean": float(positive_reward_rates.mean().item()),
-            "proposer/success_rate_gap_mean": float((positive_reward_rates - success_rates).mean().item()),
-        }
-
         print(f"Proposer reward computation (using formula: {reward_type}):")
-        print(
-            f"  - Final-correct success rates: mean={success_rates.mean():.3f}, std={success_rates.std():.3f}"
-        )
-        print(
-            f"  - Positive-reward rates (diagnostic only): mean={positive_reward_rates.mean():.3f}, std={positive_reward_rates.std():.3f}"
-        )
+        print(f"  - Success rates: mean={success_rates.mean():.3f}, std={success_rates.std():.3f}")
         print(
             f"  - Proposer rewards: mean={proposer_reward_values.mean():.3f}, std={proposer_reward_values.std():.3f}, max={proposer_reward_values.max():.3f}"
         )
@@ -1616,8 +1460,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
 
         gen_batch.meta_info["global_token_num"] = torch.sum(gen_batch.batch["attention_mask"], dim=-1).tolist()
 
-        # Ensure batch is unlocked before modification
-        gen_batch.ensure_unlocked()
         for key in gen_batch.batch.keys():
             if key not in [
                 "old_log_probs",
@@ -1637,7 +1479,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
             loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
             entropy_agg = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
             metrics[f"{role}/actor/entropy"] = entropy_agg.detach().item()
-            old_log_prob.ensure_unlocked()
             old_log_prob.batch.pop("entropys")
             gen_batch = gen_batch.union(old_log_prob)
 
@@ -1712,7 +1553,7 @@ class SSPRayPPOTrainer(RayPPOTrainer):
         try:
             import os
 
-            base_dir = os.environ.get("TRAJECTORY_DIR", "./output/trajectories")
+            base_dir = "/primus_oss/output"
             role_dir = os.path.join(base_dir, role)
             os.makedirs(role_dir, exist_ok=True)
 
@@ -1795,8 +1636,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
             if SELF_PLAY_DEBUG:
                 logger.debug(f"Final batch size after processing: {len(batch)}")
 
-            # Ensure batch is unlocked before modification
-            batch.ensure_unlocked()
             for key in batch.batch.keys():
                 if key not in [
                     "old_log_probs",
@@ -1847,19 +1686,9 @@ class SSPRayPPOTrainer(RayPPOTrainer):
                         logger.debug(f"Trajectory {i}: data_source = {metadata['data_source']}")
 
                 if "extra_info" in batch.non_tensor_batch and i < len(batch.non_tensor_batch["extra_info"]):
-                    metadata["extra_info"] = enrich_extra_info_with_process_reward(
-                        batch.non_tensor_batch["extra_info"][i],
-                        input_text,
-                        node_filter_mode=self.process_reward_node_filter_mode,
-                    )
+                    metadata["extra_info"] = batch.non_tensor_batch["extra_info"][i]
                     if SELF_PLAY_DEBUG:
                         logger.debug(f"Trajectory {i}: extra_info = {metadata['extra_info']}")
-                else:
-                    metadata["extra_info"] = enrich_extra_info_with_process_reward(
-                        None,
-                        input_text,
-                        node_filter_mode=self.process_reward_node_filter_mode,
-                    )
 
             trajectory = {
                 "input": input_text,
@@ -1878,31 +1707,16 @@ class SSPRayPPOTrainer(RayPPOTrainer):
 
         return trajectories
 
-    def _extract_and_process_problems(self, trajectories: List[Dict[str, Any]], record_stats: bool = True) -> tuple:
-        """
-        Extract and process problems from trajectories.
-        
-        Args:
-            trajectories: List of trajectory dictionaries
-            record_stats: Whether to record stats to sp_data_manager (default True)
-                         Set to False when accumulating stats across multiple batches in dynamic sampling
-        
-        Returns:
-            If record_stats is True: List of valid problems
-            If record_stats is False: Tuple of (valid_problems, extraction_stats_dict)
-        """
+    def _extract_and_process_problems(self, trajectories: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if SELF_PLAY_DEBUG:
             logger.debug(f"Starting problem extraction from {len(trajectories)} trajectories")
             for i, traj in enumerate(trajectories[:3]):
                 logger.debug(f"Trajectory {i} output for extraction: {traj['output'][:500]}...")
 
-        if record_stats:
-            ray.get(self.sp_data_manager.reset_current_step_stats.remote())
+        ray.get(self.sp_data_manager.reset_current_step_stats.remote())
 
         start_time = time.time()
-        # 降低并发数以避免 API 429 限流错误
-        rag_max_workers = self.sp_config.get("rag_max_workers", 4)  # 默认 4 个线程
-        extracted_problems, extraction_stats = extract_problems_batch(trajectories, self.problem_extractor, max_workers=rag_max_workers)
+        extracted_problems, extraction_stats = extract_problems_batch(trajectories, self.problem_extractor)
         end_time = time.time()
         if SELF_PLAY_DEBUG:
             logger.debug(f"Extracted {len(extracted_problems)} problems in {end_time - start_time} seconds")
@@ -1911,7 +1725,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
                 logger.debug(f"Raw problem {i}: {problem}")
 
         valid_problems = []
-        second_stage_failures = {}  # 第二阶段验证失败统计
         for i, problem in enumerate(extracted_problems):
             if self._validate_extracted_problem(problem):
                 valid_problems.append(problem)
@@ -1920,99 +1733,25 @@ class SSPRayPPOTrainer(RayPPOTrainer):
             else:
                 if SELF_PLAY_DEBUG:
                     logger.debug(f"Problem {i} is INVALID: {problem}")
-                # 统计第二阶段失败
-                if "second_stage_validation_failed" not in second_stage_failures:
-                    second_stage_failures["second_stage_validation_failed"] = 0
-                second_stage_failures["second_stage_validation_failed"] += 1
 
         print(f"Extracted {len(extracted_problems)} problems, {len(valid_problems)} valid")
 
-        # 保存详细的提取统计信息到文件
-        self._save_extraction_stats(extraction_stats, second_stage_failures, len(trajectories), len(valid_problems))
-
-        # Build stats dict for this batch
-        batch_stats = {
-            "trajectories_count": extraction_stats["trajectories_count"],
-            "answer_matches_count": extraction_stats["answer_matches_count"],
-            "valid_questions_count": extraction_stats["valid_questions_count"],
-            "format_error_count": extraction_stats["format_error_count"],
-            "successful_problems_count": len(valid_problems),
-        }
-
-        if record_stats:
-            ray.get(
-                self.sp_data_manager.record_extraction_stats.remote(
-                    trajectories_count=batch_stats["trajectories_count"],
-                    answer_matches_count=batch_stats["answer_matches_count"],
-                    valid_questions_count=batch_stats["valid_questions_count"],
-                    format_error_count=batch_stats["format_error_count"],
-                    successful_problems_count=batch_stats["successful_problems_count"],
-                )
+        ray.get(
+            self.sp_data_manager.record_extraction_stats.remote(
+                trajectories_count=extraction_stats["trajectories_count"],
+                answer_matches_count=extraction_stats["answer_matches_count"],
+                valid_questions_count=extraction_stats["valid_questions_count"],
+                format_error_count=extraction_stats["format_error_count"],
+                successful_problems_count=len(valid_problems),
             )
+        )
 
         if SELF_PLAY_DEBUG:
             logger.debug(f"Final valid problems count: {len(valid_problems)}")
             for i, problem in enumerate(valid_problems[:2]):  # Debug first 2 valid problems
                 logger.debug(f"Valid problem {i}: {problem}")
 
-        if record_stats:
-            return valid_problems
-        else:
-            return valid_problems, batch_stats
-
-    def _save_extraction_stats(self, extraction_stats: Dict, second_stage_failures: Dict, total_trajectories: int, valid_count: int):
-        """保存详细的提取统计信息到文件"""
-        import json
-        from datetime import datetime
-        
-        stats_dir = os.environ.get("EXTRACTION_STATS_DIR", "./output/extraction_stats")
-        os.makedirs(stats_dir, exist_ok=True)
-        
-        # 合并所有失败原因
-        failure_reasons = extraction_stats.get("failure_reasons", {}).copy()
-        failure_reasons.update(second_stage_failures)
-        
-        # 计算各阶段统计
-        stats_summary = {
-            "step": self.global_steps,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "total_trajectories": total_trajectories,
-            "final_valid_count": valid_count,
-            "success_rate": f"{valid_count / total_trajectories * 100:.2f}%" if total_trajectories > 0 else "0%",
-            "failure_breakdown": {},
-            "raw_stats": {
-                "trajectories_count": extraction_stats.get("trajectories_count", 0),
-                "answer_matches_count": extraction_stats.get("answer_matches_count", 0),
-                "valid_questions_count": extraction_stats.get("valid_questions_count", 0),
-                "successful_problems_count": extraction_stats.get("successful_problems_count", 0),
-                "format_error_count": extraction_stats.get("format_error_count", 0),
-            }
-        }
-        
-        # 按失败数量排序
-        sorted_failures = sorted(failure_reasons.items(), key=lambda x: -x[1])
-        for reason, count in sorted_failures:
-            percentage = count / total_trajectories * 100 if total_trajectories > 0 else 0
-            stats_summary["failure_breakdown"][reason] = {
-                "count": count,
-                "percentage": f"{percentage:.1f}%"
-            }
-        
-        # 保存到文件
-        stats_file = os.path.join(stats_dir, f"extraction_stats_step_{self.global_steps}.json")
-        with open(stats_file, "w", encoding="utf-8") as f:
-            json.dump(stats_summary, f, indent=2, ensure_ascii=False)
-        
-        # 打印摘要
-        print(f"\n{'='*60}")
-        print(f"📊 Extraction Stats at Step {self.global_steps}")
-        print(f"{'='*60}")
-        print(f"Total: {total_trajectories} | Valid: {valid_count} | Rate: {stats_summary['success_rate']}")
-        print(f"\nFailure Breakdown (by first failure reason):")
-        for reason, info in list(stats_summary["failure_breakdown"].items())[:10]:
-            print(f"  - {reason}: {info['count']} ({info['percentage']})")
-        print(f"\nStats saved to: {stats_file}")
-        print(f"{'='*60}\n")
+        return valid_problems
 
     def _create_fallback_problem_for_failed_extraction(
         self, trajectory: Dict[str, Any], trajectory_index: int
@@ -2067,7 +1806,6 @@ class SSPRayPPOTrainer(RayPPOTrainer):
         self, trajectory: Dict[str, Any], trajectory_index: int
     ) -> Dict[str, Any]:
         metadata = trajectory.get("metadata", {})
-        source_extra_info = deepcopy(metadata.get("extra_info", {}))
 
         dummy_prompt = [
             {"role": "system", "content": "You are a helpful and harmless assistant."},
@@ -2078,12 +1816,16 @@ class SSPRayPPOTrainer(RayPPOTrainer):
         ]
 
         dummy_reward_model = metadata.get("reward_model", {"ground_truth": {"target": "dummy_answer", "style": "rule"}})
-        dummy_extra_info = source_extra_info if isinstance(source_extra_info, dict) else {}
-        dummy_extra_info.update(
-            {
+
+        dummy_problem = {
+            "data_source": "dummy",
+            "prompt": dummy_prompt,
+            "ability": "fact-reasoning",
+            "reward_model": dummy_reward_model,
+            "extra_info": {
                 "question": "This is a dummy problem. Please directly output </answer>",
                 "need_tools_kwargs": True,
-                "split": dummy_extra_info.get("split", "train"),
+                "split": "train",
                 "tools_kwargs": {
                     "search": {
                         "create_kwargs": {
@@ -2094,15 +1836,7 @@ class SSPRayPPOTrainer(RayPPOTrainer):
                     }
                 },
                 "extraction_failed": True,
-            }
-        )
-
-        dummy_problem = {
-            "data_source": "dummy",
-            "prompt": dummy_prompt,
-            "ability": "fact-reasoning",
-            "reward_model": dummy_reward_model,
-            "extra_info": dummy_extra_info,
+            },
             "metadata": None,
             "extracted_question": "This is a dummy problem. Please directly output </answer>",
             "formatted_prompt": dummy_prompt,
@@ -2121,15 +1855,8 @@ class SSPRayPPOTrainer(RayPPOTrainer):
             return False
 
         answer = problem.get("reward_model", {}).get("ground_truth", {}).get("target", None)
-        if answer is not None:
-            # Handle both string and list answers
-            if isinstance(answer, list):
-                # Check if any answer in the list is in the question
-                for ans in answer:
-                    if isinstance(ans, str) and ans in question:
-                        return False
-            elif isinstance(answer, str) and answer in question:
-                return False
+        if answer in question:
+            return False
 
         return True
 
