@@ -9,12 +9,13 @@ from verl.trainer.ppo.ray_trainer import Role, ResourcePoolManager
 def get_trainer_class(config):
     """Return the PPO trainer class for an algorithm name."""
     from quarl.trainer.ppo.searchr1_ray_trainer import Searchr1RayPPOTrainer
+    from quarl.trainer.ppo.kgssp_ray_trainer import KGSSPRayPPOTrainer
     from quarl.trainer.ppo.ssp_ray_trainer import SSPRayPPOTrainer
     algorithm_name = _resolve_algorithm_name(config)
     trainer_registry = {
         "search_r1": Searchr1RayPPOTrainer,
         "ssp": SSPRayPPOTrainer,
-        "kg_self_play": SSPRayPPOTrainer,
+        "kg_self_play": KGSSPRayPPOTrainer,
     }
     try:
         print(f"Selected trainer class: {trainer_registry[algorithm_name].__name__}")
