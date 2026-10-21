@@ -25,7 +25,11 @@ from sglang.srt.function_call.core_types import (
 from sglang.srt.function_call.ebnf_composer import EBNFComposer
 from sglang.srt.function_call.function_call_parser import FunctionCallParser
 from sglang.srt.function_call.qwen25_detector import Qwen25Detector
-from sglang.srt.openai_api.protocol import Tool
+try:
+    # sglang >= 0.4.9: openai_api/ moved to entrypoints/openai/
+    from sglang.srt.entrypoints.openai.protocol import Tool
+except ImportError:
+    from sglang.srt.openai_api.protocol import Tool  # sglang <= 0.4.6
 from tensordict import TensorDict
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.nn.utils.rnn import pad_sequence
