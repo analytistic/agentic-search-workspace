@@ -41,7 +41,7 @@ from verl.tools.schemas import (
     OpenAIFunctionParsedSchema,
     OpenAIFunctionToolCall,
 )
-from verl.utils.debug import GPUMemoryLogger
+from verl.utils.profiler.performance import GPUMemoryLogger
 from verl.utils.torch_functional import get_response_mask, pad_sequence_to_length
 from verl.workers.rollout.schemas import (
     AsyncRolloutRequest,

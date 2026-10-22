@@ -39,7 +39,7 @@ from verl.trainer.ppo.ray_trainer import RayPPOTrainer, apply_kl_penalty, comput
 from verl.trainer.ppo.reward import compute_reward, compute_reward_async
 from verl.utils.checkpoint.checkpoint_manager import should_save_ckpt_esi
 from verl.utils.debug import marked_timer
-from verl.utils.metric import reduce_metrics
+from verl.utils.metric.utils import reduce_metrics
 from verl.utils.model import compute_position_id_with_mask
 from verl.utils.tracking import Tracking
 

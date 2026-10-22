@@ -6,7 +6,7 @@ from functools import partial
 import torch
 import torch.distributed
 import verl.utils.torch_functional as verl_F
-from verl.utils.debug import log_gpu_memory_usage
+from verl.utils.profiler.performance import log_gpu_memory_usage
 from verl.utils.device import get_device_name
 from verl.utils.fs import copy_to_local
 from verl.workers.fsdp_workers import (

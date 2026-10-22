@@ -1,4 +1,4 @@
-from verl.utils.reward_score import search_r1_like_qa_em
+from quarl.reward.score.search_r1_like_qa_em import search_r1_like_qa_em
 from quarl.reward.score.process_score import (
     compute_think_length_penalty,
     extract_think_text,
