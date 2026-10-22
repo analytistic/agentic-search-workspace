@@ -28,72 +28,33 @@ def get_trainer_class(config):
 
 
 def get_role_worker_mapping(config):
-    """Build the role-to-worker mapping used by the PPO trainer."""
+    """Build the role-to-worker mapping used by the PPO trainer (verl 0.9.0).
+
+    Follows verl's own ``trainer/main_ppo_v0.py``: a single
+    ``ActorRolloutRefWorker`` covers actor+rollout(+ref) and ``TrainingWorker``
+    covers critic; reward models are handled by RewardLoopManager, not by a
+    worker role.
+    """
     import ray
     from verl.trainer.ppo.ray_trainer import Role
+    from verl.trainer.ppo.utils import need_critic, need_reference_policy
+    from verl.workers.engine_workers import ActorRolloutRefWorker, TrainingWorker
 
-    from verl.workers.fsdp_workers import (
-        ActorRolloutRefWorker as FSDPActorRolloutRefWorker,
-        AsyncActorRolloutRefWorker as FSDPAsyncActorRolloutRefWorker,
-    )
-    from quarl.worker.fsdp_worker import SSPActorRolloutRefWorker
+    lora_rank = config.actor_rollout_ref.model.get("lora", {}).get("rank", 0)
+    if lora_rank <= 0:
+        lora_rank = config.actor_rollout_ref.model.get("lora_rank", 0)
+    ref_in_actor = lora_rank > 0 or config.actor_rollout_ref.model.get("lora_adapter_path") is not None
 
-    strategy = config.actor_rollout_ref.actor.strategy
-    actor_worker_registry = {
-        ("fsdp", "search_r1"): FSDPActorRolloutRefWorker,
-        ("fsdp", "ssp"): SSPActorRolloutRefWorker,
-        ("fsdp", "kg_self_play"): SSPActorRolloutRefWorker,
-        ("fsdp2", "search_r1"): FSDPActorRolloutRefWorker,
-        ("fsdp2", "ssp"): SSPActorRolloutRefWorker,
-        ("fsdp2", "kg_self_play"): SSPActorRolloutRefWorker,
-    }
-    algorithm_name = _resolve_algorithm_name(config)
-    registry_key = (strategy, algorithm_name)
-    try:
-        actor_rollout_cls = actor_worker_registry[registry_key]
-    except KeyError as exc:
-        if strategy == "megatron":
-            # megatron workers imported lazily (unused in fsdp configs)
-            from verl.workers.megatron_workers import ActorRolloutRefWorker as MegatronActorRolloutRefWorker
-
-            actor_rollout_cls = MegatronActorRolloutRefWorker
-        else:
-            raise ValueError(f"Unsupported actor strategy/algorithm: {registry_key}") from exc
-
-    if strategy in ["fsdp", "fsdp2"]:
-        from verl.workers.fsdp_workers import CriticWorker
-
-        critic_worker_cls = CriticWorker
-    elif strategy == "megatron":
-        from verl.workers.megatron_workers import CriticWorker
-
-        critic_worker_cls = CriticWorker
+    # Ref policy is fused into ActorRolloutRefWorker unless LoRA is used with
+    # a dedicated ref model.
+    if need_reference_policy(config) and not ref_in_actor:
+        role = Role.ActorRolloutRef
     else:
-        raise NotImplementedError(f"Unsupported actor strategy: {strategy}")
+        role = Role.ActorRollout
+    role_worker_mapping = {role: ray.remote(ActorRolloutRefWorker)}
 
-    role_worker_mapping = {
-        Role.ActorRollout: ray.remote(actor_rollout_cls),
-        Role.Critic: ray.remote(critic_worker_cls),
-    }
-
-    if config.reward_model.enable:
-        if config.reward_model.strategy in ["fsdp", "fsdp2"]:
-            from verl.workers.fsdp_workers import RewardModelWorker
-        elif config.reward_model.strategy == "megatron":
-            from verl.workers.megatron_workers import RewardModelWorker
-        else:
-            raise NotImplementedError(
-                f"Unsupported reward model strategy: {config.reward_model.strategy}"
-            )
-        role_worker_mapping[Role.RewardModel] = ray.remote(RewardModelWorker)
-
-    if config.algorithm.get("use_ref_policy", False) or config.algorithm.get("use_kl", False):
-        if strategy in ["fsdp", "fsdp2"]:
-            from verl.workers.fsdp_workers import ActorRolloutRefWorker as RefPolicyWorker
-        else:
-            from verl.workers.megatron_workers import ActorRolloutRefWorker as RefPolicyWorker
-
-        role_worker_mapping[Role.RefPolicy] = ray.remote(RefPolicyWorker)
+    if need_critic(config):
+        role_worker_mapping[Role.Critic] = ray.remote(TrainingWorker)
 
     return role_worker_mapping
 
@@ -302,8 +263,8 @@ def build_trainer(
         for role in role_worker_mapping
     }
     ray_worker_group_cls = get_resource_pool_manager(config)
-    reward_fn = load_reward_manager(config, tokenizer, num_examine=0, **config.reward_model.get("reward_kwargs", {}))
-    val_reward_fn = load_reward_manager(_resolve_diff_val_reward_fn_config(config), tokenizer, num_examine=1)
+    # verl 0.9.0: reward is configured via config.reward (custom_reward_function
+    # + reward_manager) and computed by RewardLoopManager inside the trainer.
     resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
     from verl.utils.dataset.rl_dataset import collate_fn
@@ -318,8 +279,6 @@ def build_trainer(
         role_worker_mapping=role_worker_mapping,
         resource_pool_manager=resource_pool_manager,
         ray_worker_group_cls=ray_worker_group_cls,
-        reward_fn=reward_fn,
-        val_reward_fn=val_reward_fn,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
         collate_fn=collate_fn,

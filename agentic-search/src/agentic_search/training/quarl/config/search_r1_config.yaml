@@ -16,6 +16,21 @@ algorithm:
   chat_template: default
   adv_estimator: grpo
 
+# verl 0.9.0 reward stack: config.reward drives RewardLoopManager.
+# The EM scorer below follows the RawRewardFn convention
+# (compute_score(data_source=..., solution_str=..., ground_truth=...)).
+reward:
+  num_workers: 8
+  custom_reward_function:
+    path: ${oc.env:WORKSPACE}/quarl/reward/score/qa_em.py
+    name: compute_score
+  reward_manager:
+    source: register
+    name: naive
+  reward_model:
+    enable: false
+
+# legacy 0.5-era reward sections (kept for reference; 0.9.0 uses `reward:`)
 reward_model:
   model:
     type: naive
