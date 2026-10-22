@@ -73,6 +73,11 @@ class TaskRunner:
         from quarl.utils.patch.metric_patch import apply_metric_patch
         apply_metric_patch(tokenizer)
 
+        # Import quarl agent loop modules so their @register hooks populate
+        # verl's _agent_loop_registry before AgentLoopWorker assembles loops
+        # from config.actor_rollout_ref.agent.default_agent_loop.
+        import quarl.worker.rollout.vllm_rollout  # noqa: F401  (registers "search_r1_agent")
+
         # cls should be imported after apply_metric_patch
         trainer = build_trainer(config, tokenizer, processor)
 
