@@ -34,6 +34,14 @@ OUTPUT_DIR="${OUTPUT_ROOT}/${OUTPUT_SUBDIR}/$(date +"%-m_%-d_%-H")"
 SAVE_CHECKPOINT_DIR="${OUTPUT_DIR}/ckpt"
 TENSORBOARD_LOG_DIR="${OUTPUT_DIR}/logs/tensorboard"
 
+# ---- judge service (validation scoring: search_eval_score -> llm_as_a_judge) ----
+# Required even if the service is down: outcome_score raises ValueError when
+# JUDGE_BASE_URL/JUDGE_MODEL are unset; with the vars set, a down service
+# simply yields judge score 0 (EM/F1 parts still work).
+export JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://judge_host:5000/v1}"
+export JUDGE_MODEL="${JUDGE_MODEL:-judge_model_name}"
+export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
+
 # ---- cluster ----
 NNODES="${NNODES:-1}"
 RANK="${RANK:-0}"
