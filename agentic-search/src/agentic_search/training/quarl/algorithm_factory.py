@@ -6,20 +6,26 @@ training algorithm.
 """
 from verl.trainer.ppo.ray_trainer import Role, ResourcePoolManager
 
+def _lazy_import(module_name: str, class_name: str):
+    """Import a class on demand (keeps unrelated trainer modules out of the
+    import path, e.g. ssp/kgssp while running search_r1)."""
+    import importlib
+
+    return getattr(importlib.import_module(module_name), class_name)
+
+
 def get_trainer_class(config):
-    """Return the PPO trainer class for an algorithm name."""
-    from quarl.trainer.ppo.searchr1_ray_trainer import Searchr1RayPPOTrainer
-    from quarl.trainer.ppo.kgssp_ray_trainer import KGSSPRayPPOTrainer
-    from quarl.trainer.ppo.ssp_ray_trainer import SSPRayPPOTrainer
+    """Return the PPO trainer class for an algorithm name (lazy imports)."""
     algorithm_name = _resolve_algorithm_name(config)
     trainer_registry = {
-        "search_r1": Searchr1RayPPOTrainer,
-        "ssp": SSPRayPPOTrainer,
-        "kg_self_play": KGSSPRayPPOTrainer,
+        "search_r1": ("quarl.trainer.ppo.searchr1_ray_trainer", "Searchr1RayPPOTrainer"),
+        "ssp": ("quarl.trainer.ppo.ssp_ray_trainer", "SSPRayPPOTrainer"),
+        "kg_self_play": ("quarl.trainer.ppo.kgssp_ray_trainer", "KGSSPRayPPOTrainer"),
     }
     try:
-        print(f"Selected trainer class: {trainer_registry[algorithm_name].__name__}")
-        return trainer_registry[algorithm_name]
+        trainer_cls = _lazy_import(*trainer_registry[algorithm_name])
+        print(f"Selected trainer class: {trainer_cls.__name__}")
+        return trainer_cls
     except KeyError as exc:
         raise ValueError(
             f"Unsupported algorithm.name={algorithm_name!r}; "
