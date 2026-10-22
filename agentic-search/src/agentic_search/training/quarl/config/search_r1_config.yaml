@@ -65,7 +65,11 @@ actor_rollout_ref:
       enable: true # enable multi-turn rollout
       use_inference_chat_template: false # use inference chat template
       tokenization_sanity_check_mode: disable # disable tokenization sanity check
-      tool_config_path: null # tool config path
+      tool_config_path: ${oc.env:WORKSPACE}/examples/tool_config/search_tool_config.yaml
+      max_obs_length: 512
+  agent:
+    default_agent_loop: search_r1_agent
+    agent_loop_config_path: null
 
 
 
