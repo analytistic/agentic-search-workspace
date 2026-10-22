@@ -25,8 +25,11 @@ reward:
     path: ${oc.env:WORKSPACE}/quarl/reward/score/qa_em.py
     name: compute_score
   reward_manager:
-    source: register
-    name: naive
+    source: importlib
+    name: SearchR1RewardManager
+    module:
+      path: ${oc.env:WORKSPACE}/quarl/reward/manager/search_r1_reward_manager.py
+      name: custom_reward_manager
   reward_model:
     enable: false
 

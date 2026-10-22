@@ -106,6 +106,18 @@ class SearchR1AgentLoop(AgentLoopBase):
         )
         agent_data.extra_fields.update(kwargs.get("extra_info", {}) or {})
 
+        # verl 0.9.0 does not carry the validate flag past the agent loop
+        # (DataProto.pop and the loop output rebuild meta_info). Detect it
+        # from the sampling params (validate runs use config.val_kwargs) and
+        # attach it to extra_fields -> non_tensor_batch["validate"] so
+        # SearchR1RewardManager can dispatch train vs validation scoring.
+        vc = self.rollout_config.val_kwargs
+        agent_data.extra_fields["validate"] = bool(
+            sampling_params.get("top_p") == vc.top_p
+            and sampling_params.get("top_k") == vc.top_k
+            and sampling_params.get("temperature") == vc.temperature
+        )
+
         state = AgentState.PENDING
         while state != AgentState.TERMINATED:
             if state == AgentState.PENDING:
