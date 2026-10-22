@@ -25,6 +25,20 @@ import torch  # must precede faiss: on macOS, importing faiss first breaks torch
 import faiss
 import numpy as np
 import uvicorn
+
+
+def _read_index_mmap(path):
+    """Memory-map a faiss index file.
+
+    Newer faiss (>= 1.12) exposes mmap either as ``read_index_mmap`` or via
+    the ``IO_FLAG_MMAP`` flag on ``read_index``; older builds fall back to a
+    full in-RAM load so the server never breaks on an old faiss.
+    """
+    if hasattr(faiss, "read_index_mmap"):
+        return faiss.read_index_mmap(path)
+    if hasattr(faiss, "IO_FLAG_MMAP"):
+        return faiss.read_index(path, faiss.IO_FLAG_MMAP)
+    return faiss.read_index(path)
 from fastapi import FastAPI
 from pydantic import BaseModel
 from tqdm import tqdm
@@ -229,7 +243,14 @@ class DenseRetriever(BaseRetriever):
 
         t0 = time.time()
         print(f"[load] index: {self.index_path}", flush=True)
-        self.index = faiss.read_index(self.index_path)
+        # mmap keeps the index on disk (page-cache backed) instead of loading
+        # it fully into RAM; requires faiss >= 1.12 (read_index_mmap / IO_FLAG_MMAP).
+        # GPU mode needs the full index in RAM first, so it falls back to
+        # a plain full load.
+        if config.index_mmap and not config.faiss_gpu:
+            self.index = _read_index_mmap(self.index_path)
+        else:
+            self.index = faiss.read_index(self.index_path)
         print(f"[load] index done ({self.index.ntotal} vectors, {time.time() - t0:.1f}s)", flush=True)
         if config.faiss_gpu:
             co = faiss.GpuMultipleClonerOptions()
@@ -324,6 +345,7 @@ class Config:
         dataset_path: str = "./data",
         data_split: str = "train",
         faiss_gpu: bool = True,
+        index_mmap: bool = True,
         retrieval_model_path: str = "./model",
         retrieval_pooling_method: str = "mean",
         retrieval_query_max_length: int = 256,
@@ -337,6 +359,7 @@ class Config:
         self.dataset_path = dataset_path
         self.data_split = data_split
         self.faiss_gpu = faiss_gpu
+        self.index_mmap = index_mmap
         self.retrieval_model_path = retrieval_model_path
         self.retrieval_pooling_method = retrieval_pooling_method
         self.retrieval_query_max_length = retrieval_query_max_length
@@ -430,6 +453,11 @@ if __name__ == "__main__":
         "--retriever_model", type=str, default="intfloat/e5-base-v2", help="Path of the retriever model."
     )
     parser.add_argument("--faiss_gpu", action="store_true", help="Use GPU for computation")
+    parser.add_argument(
+        "--no-index-mmap",
+        action="store_true",
+        help="Load the faiss index fully into RAM instead of memory-mapping it",
+    )
 
     args = parser.parse_args()
 
@@ -441,6 +469,7 @@ if __name__ == "__main__":
         corpus_path=args.corpus_path,
         retrieval_topk=args.topk,
         faiss_gpu=args.faiss_gpu,
+        index_mmap=not args.no_index_mmap,
         retrieval_model_path=args.retriever_model,
         retrieval_pooling_method="mean",
         retrieval_query_max_length=256,
