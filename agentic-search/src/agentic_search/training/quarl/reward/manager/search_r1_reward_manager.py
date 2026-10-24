@@ -20,8 +20,13 @@ from quarl.reward.score.search_eval_score import compute_score as _val_compute_s
 class SearchR1RewardManager(RewardManagerBase):
     """Dispatch on the validate flag: training -> qa_em, validation -> search_eval_score."""
 
-    def __init__(self, config, tokenizer, compute_score=None):
+    def __init__(self, config, tokenizer, compute_score=None, reward_router_address=None, reward_model_tokenizer=None):
         super().__init__(config, tokenizer, compute_score)
+        # reward_router_address / reward_model_tokenizer are passed by
+        # RewardLoopWorker.load_reward_manager for reward-model setups;
+        # accepted (and ignored) here to stay compatible.
+        self.reward_router_address = reward_router_address
+        self.reward_model_tokenizer = reward_model_tokenizer
         self._train_score = compute_score or _train_compute_score
         self._val_score = _val_compute_score
 
