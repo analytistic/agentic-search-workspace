@@ -39,14 +39,6 @@ retriever:
   url: "http://localhost:8000/retrieve"
   topk: 3
 
-# ---- agent loop (LLMGenerationManager / trainer reads these directly) ----
-max_turns: 10              # agent loop turn limit
-max_start_length: 4096     # start-prompt truncation (= max_prompt_length)
-max_obs_length: 512        # observation truncation (search result text cap)
-num_gpus: 4                # generation chunking (= trainer.n_gpus_per_node)
-no_think_rl: false         # include <think> in RL (official default false)
-do_search: true            # enable searching (core Search-R1 switch)
-pad_token_id: 151643       # Qwen2.5 tokenizer pad id (change per model)
 
 data:
   max_start_length: 4096
@@ -82,32 +74,3 @@ diff_val_reward_fn_config:
   custom_reward_function:
     path: quarl/reward/score/search_eval_score.py
     name: compute_score
-
-
-# Search_R1 specific configuration
-search_r1:
-  
-  enable: false
-  lang: zh # zh or en
-  save_freq: 5
-  validate_config: true # whether to validate config in RayPPOTrainer
-  
-  mini_epochs: 1 # number of mini-epochs per training iteration
-  answer_pattern: "answer" # pattern to extract from generation output, "answer" or "question"
-  
-    
-  # Solving phase settings (solver)  
-  solver:
-    enable: true
-    do_sample: true
-    temperature: 1
-
-  
-  # Reward-based dynamic sampling configuration
-  # When enabled, will filter out proposer groups with zero reward variance and their corresponding solver trajectories
-  # This helps ensure training data has sufficient reward diversity
-  reward_dynamic_sampling:
-    enable: false # Enable reward-based dynamic sampling
-    metric: "seq_final_reward" # Metric to use for filtering: "seq_final_reward" or "seq_reward"
-    max_num_gen_batches: 30 # Maximum number of generation batches to use for filtering
-  
