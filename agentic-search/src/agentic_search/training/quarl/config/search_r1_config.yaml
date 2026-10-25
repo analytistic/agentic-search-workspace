@@ -33,23 +33,6 @@ reward:
   reward_model:
     enable: false
 
-# legacy 0.5-era reward sections (kept for reference; 0.9.0 uses `reward:`)
-reward_model:
-  model:
-    type: naive
-  reward_manager: search_r1
-
-custom_reward_functions:
-  qa_em:
-    labels:
-      - unknown
-    integration: sum
-    kwargs:
-      think_only: true
-      max_search_calls: 10
-      max_response_tokens: 8192
-      think_length_penalty_beta: 0.0
-
 # Search-R1 trainer reads retriever.url for its batch_search calls
 # (launch script overrides url with the real SEARCH_IP).
 retriever:
