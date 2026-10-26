@@ -28,7 +28,7 @@ DATA_PATH="/data/xuwentao_data/search_r1/train.parquet"        # parquet without
 TEST_DATA_PATH="/data/xuwentao_data/ssp/test.jsonl"
 
 # ---- output (checkpoints are large: 7B bf16 + fp32 optimizer ~40-50GB each; keep on /data) ----
-OUTPUT_ROOT="${OUTPUT_ROOT:-/data/xuwentao_data/search_r1_output}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/data/xuwentao_data/output}"
 OUTPUT_SUBDIR="${OUTPUT_SUBDIR:-searchr1_Qwen2.5-7B-Instruct}"
 OUTPUT_DIR="${OUTPUT_ROOT}/${OUTPUT_SUBDIR}/$(date +"%-m_%-d_%-H")"
 SAVE_CHECKPOINT_DIR="${OUTPUT_DIR}/ckpt"
