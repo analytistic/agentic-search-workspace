@@ -123,6 +123,17 @@ if [ "$RANK" -eq 0 ] && [ "$RETRIEVER_ENABLE" = "1" ]; then
     start_retriever
 fi
 
+# ---- mlflow trace db (pre-init so AgentLoopWorkers don't race the alembic migration) ----
+if [ "$RANK" -eq 0 ]; then
+    rm -f /tmp/mlruns.db
+    "$PYTHON" -c "
+import mlflow
+mlflow.set_tracking_uri('sqlite:///tmp/mlruns.db')
+mlflow.set_experiment('searchr1_grpo')
+print('mlflow db ready')
+"
+fi
+
 # ---- Ray cluster ----
 ray stop || true
 # Ray natively detects Ascend NPUs as "NPU" resources; verl requests them
