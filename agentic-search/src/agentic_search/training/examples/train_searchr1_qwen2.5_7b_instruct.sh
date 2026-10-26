@@ -141,7 +141,6 @@ if [ "$RANK" -eq 0 ]; then
         data.val_batch_size="$VAL_BATCH_SIZE" \
         data.max_prompt_length="$MAX_PROMPT_LENGTH" \
         data.max_response_length="$MAX_RESPONSE_LENGTH" \
-        data.return_raw_chat=True \
         data.filter_overlong_prompts=True \
         data.truncation='left' \
         actor_rollout_ref.model.path="$MODEL_PATH" \
@@ -156,6 +155,7 @@ if [ "$RANK" -eq 0 ]; then
         actor_rollout_ref.rollout.max_num_batched_tokens="$PPO_MAX_TOKEN_LEN_PER_GPU" \
         actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \
         actor_rollout_ref.rollout.n="$ROLLOUT_N" \
+        actor_rollout_ref.rollout.multi_turn.max_assistant_turns="$MAX_TURNS" \
         actor_rollout_ref.hybrid_engine=True \
         diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_eval_score.py" \
         trainer.project_name=searchr1_grpo \
