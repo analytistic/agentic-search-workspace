@@ -223,6 +223,16 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
                     f"legacy-regex-matches={bool(isinstance(c, str) and _LEGACY_SEARCH_GUIDE_RE.search(c))}"
                 )
         if n_changed:
+            # Show before/after of the first rewritten prompt so the
+            # transformation is visibly correct.
+            for i, (old, new) in enumerate(zip(df["prompt"], aligned)):
+                if old != new and isinstance(old, list) and old and isinstance(old[0], dict):
+                    oc = old[0].get("content", "")
+                    nc = new[0].get("content", "")
+                    print(f"[create_rl_dataset]   example rewrite (row {i}):")
+                    print(f"     before: {oc[:150]!r}")
+                    print(f"     after : {nc[:150]!r}")
+                    break
             df["prompt"] = aligned
             df.to_parquet(pq)
 
