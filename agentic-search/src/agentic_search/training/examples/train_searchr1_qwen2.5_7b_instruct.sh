@@ -44,6 +44,7 @@ export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
 
 # ---- experiment tracking (offline wandb; sync later with `wandb sync`) ----
 export WANDB_MODE="${WANDB_MODE:-offline}"
+export TENSORBOARD_DIR="${TENSORBOARD_DIR:-$TENSORBOARD_LOG_DIR}"   # verl tensorboard backend writes here
 
 # ---- cluster ----
 NNODES="${NNODES:-1}"
@@ -163,6 +164,7 @@ if [ "$RANK" -eq 0 ]; then
         diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_eval_score.py" \
         trainer.project_name=searchr1_grpo \
         trainer.experiment_name=searchr1_grpo \
+        trainer.logger='["console","tensorboard"]' \
         trainer.val_before_train=True \
         trainer.val_only="$VAL_ONLY" \
         trainer.n_gpus_per_node="$N_GPUS_PER_NODE" \
