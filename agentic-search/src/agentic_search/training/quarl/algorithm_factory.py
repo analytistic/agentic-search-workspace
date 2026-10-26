@@ -214,9 +214,8 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         if "prompt" not in df.columns:
             continue
         aligned = df["prompt"].apply(lambda p: _align_searchr1_prompt(p, tool_call_guide))
-        n_changed = sum(1 for a, b in zip(df["prompt"], aligned) if _prompt_changed(a, b))
-        print(f"[create_rl_dataset] prompt alignment {pq}: {n_changed}/{len(df)} rewritten")
-        if n_changed == 0 and len(df):
+        any_changed = any(_prompt_changed(a, b) for a, b in zip(df["prompt"], aligned))
+        if not any_changed and len(df):
             # Diagnose why nothing was rewritten: structure or wording mismatch.
             p0 = df["prompt"].iloc[0]
             if isinstance(p0, np.ndarray):
@@ -238,7 +237,7 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
                     f"[create_rl_dataset]   prompt is a dict (not list!): keys={list(p0.keys())} "
                     f"legacy-regex-matches={bool(isinstance(c, str) and _LEGACY_SEARCH_GUIDE_RE.search(c))}"
                 )
-        if n_changed:
+        if any_changed:
             # Full before/after of the first rewritten prompt.
             for i, (old, new) in enumerate(zip(df["prompt"], aligned)):
                 if _prompt_changed(old, new):
