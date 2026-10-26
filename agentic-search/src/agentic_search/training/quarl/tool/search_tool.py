@@ -20,6 +20,7 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 T = TypeVar("T")
 
 
+@ray.remote
 class TokenBucketWorker:
     """Simple token-bucket rate limiter running as a Ray actor."""
 
@@ -75,10 +76,11 @@ def init_search_execution_pool(num_workers: int = 120, enable_global_rate_limit:
     """
     from ray.util import ActorPool
 
+    # SearchExecutionWorker is a plain class; wrap it at pool-init time
     workers = [
-        SearchExecutionWorker.options(num_cpus=0, max_concurrency=num_workers).remote(
-            enable_global_rate_limit=enable_global_rate_limit, rate_limit=rate_limit
-        )
+        ray.remote(SearchExecutionWorker)
+        .options(num_cpus=0, max_concurrency=num_workers)
+        .remote(enable_global_rate_limit=enable_global_rate_limit, rate_limit=rate_limit)
         for _ in range(num_workers)
     ]
     return ActorPool(workers)
