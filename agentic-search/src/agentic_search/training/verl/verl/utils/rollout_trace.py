@@ -99,29 +99,7 @@ class RolloutTraceConfig:
             MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "sqlite:////tmp/mlruns.db")
             mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
-            # Every AgentLoopWorker initializes the mlflow backend on the same
-            # default sqlite db; concurrent alembic migrations race and can
-            # crash worker startup (and a half-migrated db fails
-            # deterministically afterwards). Serialize the initialization with
-            # a cross-process file lock so the first worker migrates and the
-            # rest reuse the ready schema.
-            if MLFLOW_TRACKING_URI.startswith("sqlite:"):
-                db_path = MLFLOW_TRACKING_URI.split("///", 1)[1]
-                try:
-                    import fcntl
-
-                    lock_fd = open(db_path + ".lock", "w")
-                    fcntl.flock(lock_fd, fcntl.LOCK_EX)
-                    try:
-                        mlflow.set_experiment(project_name)
-                    finally:
-                        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                        lock_fd.close()
-                except ImportError:
-                    # non-POSIX fallback: proceed without cross-process serialization
-                    mlflow.set_experiment(project_name)
-            else:
-                mlflow.set_experiment(project_name)
+            mlflow.set_experiment(project_name)
         elif backend == "trackio":
             import trackio
             from trackio import context_vars
