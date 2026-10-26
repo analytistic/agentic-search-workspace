@@ -42,6 +42,9 @@ export JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://judge_host:5000/v1}"
 export JUDGE_MODEL="${JUDGE_MODEL:-judge_model_name}"
 export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
 
+# ---- experiment tracking (offline wandb; sync later with `wandb sync`) ----
+export WANDB_MODE="${WANDB_MODE:-offline}"
+
 # ---- cluster ----
 NNODES="${NNODES:-1}"
 RANK="${RANK:-0}"
