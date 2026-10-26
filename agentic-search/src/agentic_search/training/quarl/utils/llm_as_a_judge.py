@@ -7,7 +7,10 @@ import requests
 import copy
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
+# openai is imported lazily inside _get_client / get_global_judge so the
+# reward modules load without the package installed (the judge is only used
+# by search_eval_score, which is not invoked while the train/validation
+# split is disabled).
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +69,16 @@ class SyncLLMAsAJudge:
 
     def _get_client(self):
         """每次请求随机选择一套配置创建 client"""
+        from openai import OpenAI
+
         config = random.choice(self.configs)
         api_key = random.choice(config["api_keys"])
         return OpenAI(api_key=api_key, base_url=config["base_url"]), config["model"]
-    
+
     def _get_client_legacy(self):
         """兼容旧的单配置模式"""
+        from openai import OpenAI
+
         api_key = random.choice(self.api_keys)
         return OpenAI(api_key=api_key, base_url=self.base_url)
 
