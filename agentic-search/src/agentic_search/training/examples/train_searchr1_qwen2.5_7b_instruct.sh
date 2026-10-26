@@ -42,9 +42,8 @@ export JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://judge_host:5000/v1}"
 export JUDGE_MODEL="${JUDGE_MODEL:-judge_model_name}"
 export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
 
-# ---- experiment tracking (offline wandb; sync later with `wandb sync`) ----
-export WANDB_MODE="${WANDB_MODE:-offline}"
-export TENSORBOARD_DIR="${TENSORBOARD_DIR:-$TENSORBOARD_LOG_DIR}"   # verl tensorboard backend writes here
+# ---- experiment tracking (tensorboard backend; logs written to TENSORBOARD_DIR) ----
+export TENSORBOARD_DIR="${TENSORBOARD_DIR:-$TENSORBOARD_LOG_DIR}"
 
 # ---- cluster ----
 NNODES="${NNODES:-1}"
