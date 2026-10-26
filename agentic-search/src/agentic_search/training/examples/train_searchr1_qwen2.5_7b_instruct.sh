@@ -172,7 +172,7 @@ if [ "$RANK" -eq 0 ]; then
         actor_rollout_ref.hybrid_engine=True \
         diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_eval_score.py" \
         trainer.project_name=searchr1_grpo \
-        trainer.experiment_name=searchr1_grpo \
+        trainer.experiment_name="searchr1_grpo_$(date +%m_%d_%H)" \
         trainer.logger='["console","mlflow"]' \
         trainer.val_before_train=True \
         trainer.val_only="$VAL_ONLY" \
