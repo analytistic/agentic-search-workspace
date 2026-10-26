@@ -40,9 +40,12 @@ def main(config):
 def run_ppo(config) -> None:
     if not ray.is_initialized():
         # this is for local ray cluster
+        # verl 0.9.0 nests ray init config under ray_kwargs.ray_init
+        # (ppo_trainer.yaml); the legacy top-level ray_init no longer exists.
+        num_cpus = config.get("ray_kwargs", {}).get("ray_init", {}).get("num_cpus", None)
         ray.init(
             runtime_env=get_ppo_ray_runtime_env(),
-            num_cpus=config.ray_init.num_cpus,
+            num_cpus=num_cpus,
         )
 
     runner = TaskRunner.remote()
