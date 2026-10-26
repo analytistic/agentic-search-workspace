@@ -51,6 +51,7 @@ actor_rollout_ref:
     log_prob_micro_batch_size_per_gpu: 1   # ref (KL) model mirrors the actor's micro batch; null -> ActorConfig assert
   rollout:
     name: vllm
+    log_prob_micro_batch_size_per_gpu: 1   # actor infer-mode (old-policy/ref logprob prefill) micro batch; required when use_dynamic_bsz=False
     multi_turn:
       max_assistant_turns: 10 # maximum assistant turns
       format: hermes
