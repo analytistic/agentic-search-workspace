@@ -26,16 +26,23 @@ _LEGACY_SEARCH_GUIDE_RE = re.compile(
     r"and it will return the top searched results between <information> and </information>",
     re.IGNORECASE,
 )
-_TOOL_CALL_GUIDE = (
-    "you can search by emitting one <tool_call> block per query (each call "
-    'carries a single query): <tool_call>{"name": "search", "arguments": '
-    '{"query": "<your query>"}}</tool_call>. You can emit several tool calls '
-    "in one response to search different queries. "
-    "Search results will be returned to you"
-)
+def _tool_call_guide(max_parallel_calls: int) -> str:
+    """Build the tool-calling guidance text, reflecting the config's
+    per-round tool-call cap (multi_turn.max_parallel_calls)."""
+    return (
+        "you can search by emitting one <tool_call> block per query (each call "
+        'carries a single query): <tool_call>{"name": "search", "arguments": '
+        '{"query": "<your query>"}}</tool_call>. '
+        f"You can emit up to {max_parallel_calls} tool calls in one response "
+        "to search different queries. "
+        "Search results will be returned to you"
+    )
 
 
-def _align_searchr1_prompt(prompt):
+_TOOL_CALL_GUIDE = _tool_call_guide(1)  # default; create_rl_dataset rebuilds it from config
+
+
+def _align_searchr1_prompt(prompt, tool_call_guide: str = _TOOL_CALL_GUIDE):
     """Rewrite legacy <search>-tag guidance in user messages to JSON
     tool-calling guidance (hermes <tool_call> format). Pure: returns a new
     prompt when changed, the original object when not.
@@ -49,7 +56,7 @@ def _align_searchr1_prompt(prompt):
             and msg.get("role") == "user"
             and isinstance(msg.get("content"), str)
         ):
-            content = _LEGACY_SEARCH_GUIDE_RE.sub(_TOOL_CALL_GUIDE, msg["content"], count=1)
+            content = _LEGACY_SEARCH_GUIDE_RE.sub(tool_call_guide, msg["content"], count=1)
             if content != msg["content"]:
                 if new_prompt is None:
                     new_prompt = list(prompt)
@@ -177,11 +184,13 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
     # Legacy <search>-tag guidance -> hermes <tool_call> JSON, rewritten in
     # place (idempotent: _align_searchr1_prompt is a no-op once the marker
     # is gone, so this also covers already-aligned files cheaply).
+    max_parallel_calls = config.actor_rollout_ref.rollout.multi_turn.get("max_parallel_calls", 1)
+    tool_call_guide = _tool_call_guide(max_parallel_calls)
     for pq in converted:
         df = pd.read_parquet(pq)
         if "prompt" not in df.columns:
             continue
-        aligned = df["prompt"].apply(_align_searchr1_prompt)
+        aligned = df["prompt"].apply(lambda p: _align_searchr1_prompt(p, tool_call_guide))
         if not df["prompt"].equals(aligned):
             print(f"[create_rl_dataset] aligning legacy search prompt: {pq}")
             df["prompt"] = aligned
