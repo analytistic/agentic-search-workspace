@@ -47,6 +47,8 @@ data:
 actor_rollout_ref:
   actor:
     ppo_micro_batch_size_per_gpu: 1   # required when use_dynamic_bsz=False
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1   # ref (KL) model mirrors the actor's micro batch; null -> ActorConfig assert
   rollout:
     name: vllm
     multi_turn:
