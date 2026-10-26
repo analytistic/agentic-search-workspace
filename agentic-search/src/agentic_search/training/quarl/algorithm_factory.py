@@ -6,6 +6,8 @@ training algorithm.
 """
 import re
 
+import numpy as np
+
 from verl.trainer.ppo.ray_trainer import Role, ResourcePoolManager
 
 def _lazy_import(module_name: str, class_name: str):
@@ -45,8 +47,11 @@ _TOOL_CALL_GUIDE = _tool_call_guide(1)  # default; create_rl_dataset rebuilds it
 def _align_searchr1_prompt(prompt, tool_call_guide: str = _TOOL_CALL_GUIDE):
     """Rewrite legacy <search>-tag guidance in user messages to JSON
     tool-calling guidance (hermes <tool_call> format). Pure: returns a new
-    prompt when changed, the original object when not.
+    prompt when changed, the original object when not. Accepts a list or a
+    numpy array (parquet may materialize the column as an object array).
     """
+    if isinstance(prompt, np.ndarray):
+        prompt = prompt.tolist()
     if not isinstance(prompt, list):
         return prompt
     new_prompt = None
@@ -62,6 +67,15 @@ def _align_searchr1_prompt(prompt, tool_call_guide: str = _TOOL_CALL_GUIDE):
                     new_prompt = list(prompt)
                 new_prompt[i] = {**msg, "content": content}
     return new_prompt if new_prompt is not None else prompt
+
+
+def _prompt_changed(a, b) -> bool:
+    """Compare two prompt values (lists or numpy arrays) for inequality."""
+    if isinstance(a, np.ndarray):
+        a = a.tolist()
+    if isinstance(b, np.ndarray):
+        b = b.tolist()
+    return a != b
 
 
 def get_trainer_class(config):
@@ -200,11 +214,13 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         if "prompt" not in df.columns:
             continue
         aligned = df["prompt"].apply(lambda p: _align_searchr1_prompt(p, tool_call_guide))
-        n_changed = sum(1 for a, b in zip(df["prompt"], aligned) if a != b)  # 有多少行 prompt 被改写
+        n_changed = sum(1 for a, b in zip(df["prompt"], aligned) if _prompt_changed(a, b))
         print(f"[create_rl_dataset] prompt alignment {pq}: {n_changed}/{len(df)} rewritten")
         if n_changed == 0 and len(df):
             # Diagnose why nothing was rewritten: structure or wording mismatch.
             p0 = df["prompt"].iloc[0]
+            if isinstance(p0, np.ndarray):
+                p0 = p0.tolist()
             print(f"[create_rl_dataset]   sample prompt type={type(p0).__name__}")
             if isinstance(p0, list) and p0 and isinstance(p0[0], dict):
                 m0 = p0[0]
@@ -215,7 +231,7 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
                     f"legacy-regex-matches={bool(isinstance(c, str) and _LEGACY_SEARCH_GUIDE_RE.search(c))}"
                 )
                 if isinstance(c, str):
-                    print(f"[create_rl_dataset]   content[:200]={c[:200]!r}")
+                    print(f"[create_rl_dataset]   content={c!r}")
             elif isinstance(p0, dict):
                 c = p0.get("content")
                 print(
@@ -223,15 +239,19 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
                     f"legacy-regex-matches={bool(isinstance(c, str) and _LEGACY_SEARCH_GUIDE_RE.search(c))}"
                 )
         if n_changed:
-            # Show before/after of the first rewritten prompt so the
-            # transformation is visibly correct.
+            # Full before/after of the first rewritten prompt.
             for i, (old, new) in enumerate(zip(df["prompt"], aligned)):
-                if old != new and isinstance(old, list) and old and isinstance(old[0], dict):
-                    oc = old[0].get("content", "")
-                    nc = new[0].get("content", "")
-                    print(f"[create_rl_dataset]   example rewrite (row {i}):")
-                    print(f"     before: {oc[:150]!r}")
-                    print(f"     after : {nc[:150]!r}")
+                if _prompt_changed(old, new):
+                    if isinstance(old, np.ndarray):
+                        old = old.tolist()
+                    if isinstance(new, np.ndarray):
+                        new = new.tolist()
+                    if isinstance(old, list) and old and isinstance(old[0], dict):
+                        oc = old[0].get("content", "")
+                        nc = new[0].get("content", "")
+                        print(f"[create_rl_dataset]   example rewrite (row {i}):")
+                        print(f"     before: {oc!r}")
+                        print(f"     after : {nc!r}")
                     break
             df["prompt"] = aligned
             df.to_parquet(pq)
