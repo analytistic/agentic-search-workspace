@@ -131,18 +131,10 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         else:
             converted.append(p)
 
-    from quarl.utils.chat_template import SearchChatTemplate as QSCT
-    from quarl.utils.patch.chat_template import switch_apply_chat_template
-
-    template_name = config.algorithm.get("chat_template", "default")
-    if not QSCT.set_template(template_name):
-        raise ValueError(
-            f"Unknown algorithm.chat_template={template_name!r}; "
-            f"available templates: {QSCT.get_available_templates()}"
-        )
-    print("[create_rl_dataset]: SearchChatTemplate._current_template =", QSCT._current_template)
-    tokenizer = switch_apply_chat_template(tokenizer, QSCT.apply_chat_template)
-    processor = switch_apply_chat_template(processor, QSCT.apply_chat_template)
+    # NOTE: no QSCT/chat-template injection here — verl 0.9.0's RLHFDataset
+    # only returns raw_prompt (apply_chat_template moved to AgentLoop), and
+    # the rollout renders messages with the model's default chat template
+    # (format guidance lives in the data prompt).
 
     dataset_cls = RLHFDataset
     print(f"Using dataset class: {dataset_cls.__name__}")
