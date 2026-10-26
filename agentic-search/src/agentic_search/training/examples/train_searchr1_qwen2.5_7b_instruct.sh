@@ -48,8 +48,8 @@ RANK="${RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-localhost}"
 MASTER_PORT="${MASTER_PORT:-6379}"
 NODE_IP="${NODE_IP:-127.0.0.1}"
-# exported so ${oc.env:SEARCH_IP} interpolation in
-# examples/tool_config/search_tool_config.yaml resolves (QuarkSearchTool's URL)
+# exported so the search function tool (quarl/tool/search_tool_fn.py) and the
+# retrieval service on this node agree on the URL
 export SEARCH_IP="${SEARCH_IP:-127.0.0.1}"
 
 # ---- retrieval service (CPU mode on Ascend) ----
@@ -88,7 +88,7 @@ export ASCEND_VISIBLE_DEVICES
 
 mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
-# retriever URL is injected at launch (Search-R1 trainer reads config.retriever.url)
+# tool URL is resolved from SEARCH_IP/SEARCH_PORT by quarl/tool/search_tool_fn.py
 
 # ---- retrieval service (CPU: no --faiss_gpu) ----
 start_retriever() {
@@ -157,9 +157,6 @@ if [ "$RANK" -eq 0 ]; then
         actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \
         actor_rollout_ref.rollout.n="$ROLLOUT_N" \
         actor_rollout_ref.hybrid_engine=True \
-        retriever.url="http://${SEARCH_IP}:${SEARCH_PORT}/retrieve" \
-        retriever.topk="$RETRIEVER_TOPK" \
-        reward_model.reward_manager=search_r1 \
         diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_eval_score.py" \
         trainer.project_name=searchr1_grpo \
         trainer.experiment_name=searchr1_grpo \
