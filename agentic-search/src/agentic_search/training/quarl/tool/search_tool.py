@@ -7,6 +7,8 @@ from enum import Enum
 from typing import Any, Callable, Optional, Tuple, TypeVar
 from uuid import uuid4
 
+T = TypeVar("T")
+
 import ray
 import ray.actor
 from verl.tools.base_tool import BaseTool, ToolResponse
