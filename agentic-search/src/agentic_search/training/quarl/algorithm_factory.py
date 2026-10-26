@@ -186,13 +186,23 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
     # is gone, so this also covers already-aligned files cheaply).
     max_parallel_calls = config.actor_rollout_ref.rollout.multi_turn.get("max_parallel_calls", 1)
     tool_call_guide = _tool_call_guide(max_parallel_calls)
+
+    # Self-check: the tool file must exist for the rollout workers to load it.
+    ftp = config.actor_rollout_ref.rollout.multi_turn.get("function_tool_path", None)
+    if ftp:
+        ftp = str(ftp)
+        print(f"[create_rl_dataset] function_tool_path={ftp} exists={os.path.exists(ftp)}")
+    else:
+        print("[create_rl_dataset] WARNING: no function_tool_path configured -> rollout will have NO tools")
+
     for pq in converted:
         df = pd.read_parquet(pq)
         if "prompt" not in df.columns:
             continue
         aligned = df["prompt"].apply(lambda p: _align_searchr1_prompt(p, tool_call_guide))
-        if not df["prompt"].equals(aligned):
-            print(f"[create_rl_dataset] aligning legacy search prompt: {pq}")
+        n_changed = int(sum(a != b for a, b in zip(df["prompt"], aligned)))
+        print(f"[create_rl_dataset] prompt alignment {pq}: {n_changed}/{len(df)} rewritten")
+        if n_changed:
             df["prompt"] = aligned
             df.to_parquet(pq)
 
