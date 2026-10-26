@@ -4,9 +4,13 @@ Training scores with ``qa_em.compute_score`` (exact match); validation scores
 with the richer ``search_eval_score.compute_score`` (EM + F1 + judge),
 preserving the legacy ``reward_fn`` / ``val_reward_fn`` split.
 
-The validate flag is attached by ``SearchR1AgentLoop``
-(extra_fields -> non_tensor_batch["validate"]) because verl 0.9.0 does not
-carry ``meta_info["validate"]`` past the agent loop.
+NOTE: with verl's stock ``ToolAgentLoop`` (``agent.default_agent_loop:
+tool_agent``) the validate flag is no longer attached by a custom agent loop
+(verl 0.9.0 does not carry ``meta_info["validate"]`` past the agent loop), so
+``non_tensor_batch["validate"]`` is always absent -> training scoring
+(``qa_em``) applies to every sample, including validation runs. To restore
+the train/validation split, either re-attach the flag (a thin loop wrapper /
+dataset ``extra_info`` field) or run validation with a separate reward config.
 """
 
 import inspect

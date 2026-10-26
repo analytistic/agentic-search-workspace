@@ -60,8 +60,9 @@ actor_rollout_ref:
       tokenization_sanity_check_mode: disable # disable tokenization sanity check
       tool_config_path: ${oc.env:WORKSPACE}/examples/tool_config/search_tool_config.yaml
       max_obs_length: 512
+      # function_tool_path: <python module implementing the search tool>  # optional: custom tool impl
   agent:
-    default_agent_loop: search_r1_agent
+    default_agent_loop: tool_agent   # verl stock ToolAgentLoop (JSON tool calling, search = only tool)
     agent_loop_config_path: null
 
 
