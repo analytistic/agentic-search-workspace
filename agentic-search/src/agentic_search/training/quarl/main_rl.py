@@ -96,7 +96,7 @@ def create_rl_sampler(data_config, dataset):
     # use sampler for better ckpt resume
     if data_config.shuffle:
         train_dataloader_generator = torch.Generator()
-        train_dataloader_generator.manual_seed(data_config.get("seed", 1))
+        train_dataloader_generator.manual_seed(int(data_config.get("seed", 1)))  # torch requires a long
         sampler = RandomSampler(data_source=dataset, generator=train_dataloader_generator)
     else:
         sampler = SequentialSampler(data_source=dataset)
