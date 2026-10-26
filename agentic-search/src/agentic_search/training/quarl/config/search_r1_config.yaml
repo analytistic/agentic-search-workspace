@@ -59,6 +59,10 @@ actor_rollout_ref:
     response_length: 8192  # per-sample generation cap, multi-turn total (must match launcher data.max_response_length)
     max_model_len: 12288   # vLLM engine cap = prompt 4096 + response 8192
     log_prob_micro_batch_size_per_gpu: 1   # actor infer-mode (old-policy/ref logprob prefill) micro batch; required when use_dynamic_bsz=False
+    trace:
+      backend: mlflow   # per-sample trajectory tracing; view with: MLFLOW_TRACKING_URI=sqlite:///tmp/mlruns.db mlflow ui
+      token2text: true  # decode tokens to text in traces
+      max_samples_per_step_per_worker: 16   # cap trace volume per worker per step
     multi_turn:
       max_assistant_turns: 10 # maximum assistant turns
       max_parallel_calls: 3   # multiple <tool_call> blocks per round (one query each) execute in parallel
