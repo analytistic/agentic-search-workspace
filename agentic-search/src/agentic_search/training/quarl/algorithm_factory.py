@@ -214,44 +214,23 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         if "prompt" not in df.columns:
             continue
         aligned = df["prompt"].apply(lambda p: _align_searchr1_prompt(p, tool_call_guide))
-        any_changed = any(_prompt_changed(a, b) for a, b in zip(df["prompt"], aligned))
-        if not any_changed and len(df):
-            # Diagnose why nothing was rewritten: structure or wording mismatch.
-            p0 = df["prompt"].iloc[0]
-            if isinstance(p0, np.ndarray):
-                p0 = p0.tolist()
-            print(f"[create_rl_dataset]   sample prompt type={type(p0).__name__}")
-            if isinstance(p0, list) and p0 and isinstance(p0[0], dict):
-                m0 = p0[0]
-                c = m0.get("content")
-                print(
-                    f"[create_rl_dataset]   msg0 role={m0.get('role')!r} "
-                    f"content-type={type(c).__name__} "
-                    f"legacy-regex-matches={bool(isinstance(c, str) and _LEGACY_SEARCH_GUIDE_RE.search(c))}"
-                )
-                if isinstance(c, str):
-                    print(f"[create_rl_dataset]   content={c!r}")
-            elif isinstance(p0, dict):
-                c = p0.get("content")
-                print(
-                    f"[create_rl_dataset]   prompt is a dict (not list!): keys={list(p0.keys())} "
-                    f"legacy-regex-matches={bool(isinstance(c, str) and _LEGACY_SEARCH_GUIDE_RE.search(c))}"
-                )
-        if any_changed:
-            # Full before/after of the first rewritten prompt.
+        if any(_prompt_changed(a, b) for a, b in zip(df["prompt"], aligned)):
+            # Print a few before/after examples of the rewrite.
+            printed = 0
             for i, (old, new) in enumerate(zip(df["prompt"], aligned)):
                 if _prompt_changed(old, new):
                     if isinstance(old, np.ndarray):
                         old = old.tolist()
                     if isinstance(new, np.ndarray):
                         new = new.tolist()
-                    if isinstance(old, list) and old and isinstance(old[0], dict):
-                        oc = old[0].get("content", "")
-                        nc = new[0].get("content", "")
-                        print(f"[create_rl_dataset]   example rewrite (row {i}):")
-                        print(f"     before: {oc!r}")
-                        print(f"     after : {nc!r}")
-                    break
+                    oc = old[0].get("content", "") if old and isinstance(old[0], dict) else str(old)
+                    nc = new[0].get("content", "") if new and isinstance(new[0], dict) else str(new)
+                    print(f"[create_rl_dataset] example rewrite (row {i}):")
+                    print(f"  before: {oc}")
+                    print(f"  after : {nc}")
+                    printed += 1
+                    if printed >= 3:
+                        break
             df["prompt"] = aligned
             df.to_parquet(pq)
 
