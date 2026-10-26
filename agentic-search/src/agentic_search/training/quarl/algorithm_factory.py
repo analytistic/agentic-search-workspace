@@ -202,6 +202,26 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         aligned = df["prompt"].apply(lambda p: _align_searchr1_prompt(p, tool_call_guide))
         n_changed = int(sum(a != b for a, b in zip(df["prompt"], aligned)))
         print(f"[create_rl_dataset] prompt alignment {pq}: {n_changed}/{len(df)} rewritten")
+        if n_changed == 0 and len(df):
+            # Diagnose why nothing was rewritten: structure or wording mismatch.
+            p0 = df["prompt"].iloc[0]
+            print(f"[create_rl_dataset]   sample prompt type={type(p0).__name__}")
+            if isinstance(p0, list) and p0 and isinstance(p0[0], dict):
+                m0 = p0[0]
+                c = m0.get("content")
+                print(
+                    f"[create_rl_dataset]   msg0 role={m0.get('role')!r} "
+                    f"content-type={type(c).__name__} "
+                    f"legacy-regex-matches={bool(isinstance(c, str) and _LEGACY_SEARCH_GUIDE_RE.search(c))}"
+                )
+                if isinstance(c, str):
+                    print(f"[create_rl_dataset]   content[:200]={c[:200]!r}")
+            elif isinstance(p0, dict):
+                c = p0.get("content")
+                print(
+                    f"[create_rl_dataset]   prompt is a dict (not list!): keys={list(p0.keys())} "
+                    f"legacy-regex-matches={bool(isinstance(c, str) and _LEGACY_SEARCH_GUIDE_RE.search(c))}"
+                )
         if n_changed:
             df["prompt"] = aligned
             df.to_parquet(pq)
