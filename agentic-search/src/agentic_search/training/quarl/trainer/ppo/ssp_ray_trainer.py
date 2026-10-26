@@ -375,11 +375,10 @@ class SSPRayPPOTrainer(RayPPOTrainer):
 
     def fit(self):
         from verl.trainer.ppo.metric_utils import (
+            compute_data_metrics,
             compute_throughout_metrics,
             compute_timing_metrics,
         )
-
-        from quarl.utils.patch.metric_patch import quarl_compute_data_metrics
 
         tracking_logger = Tracking(
             project_name=self.config.trainer.project_name,
@@ -795,9 +794,7 @@ class SSPRayPPOTrainer(RayPPOTrainer):
 
                     print(f"[sp_ray_trainer] compute data metrics")
                     all_metrics.update(
-                        quarl_compute_data_metrics(
-                            tokenizer=self.tokenizer, batch=representative_batch, use_critic=self.use_critic
-                        )
+                        compute_data_metrics(batch=representative_batch, use_critic=self.use_critic)
                     )
 
                     n_gpus = self.resource_pool_manager.get_n_gpus()

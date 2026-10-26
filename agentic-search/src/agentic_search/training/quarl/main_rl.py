@@ -73,13 +73,7 @@ class TaskRunner:
         processor = hf_processor(local_path, use_fast=True)
 
   
-        from quarl.utils.patch.metric_patch import apply_metric_patch
-        apply_metric_patch(tokenizer)
-
-        # The agent loop is verl's stock ToolAgentLoop (``agent.default_agent_loop: tool_agent``),
-        # registered by verl itself — no quarl registration import needed.
-
-        # cls should be imported after apply_metric_patch
+        # cls should be imported after tokenizer/processor setup
         trainer = build_trainer(config, tokenizer, processor)
 
         trainer.init_workers()
