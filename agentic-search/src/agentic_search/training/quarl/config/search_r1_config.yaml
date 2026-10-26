@@ -47,8 +47,12 @@ data:
 actor_rollout_ref:
   actor:
     ppo_micro_batch_size_per_gpu: 1   # required when use_dynamic_bsz=False
+    fsdp_config:
+      model_dtype: bfloat16   # flash_attention_2 requires bf16/fp16; verl's fp32 default crashes
   ref:
     log_prob_micro_batch_size_per_gpu: 1   # ref (KL) model mirrors the actor's micro batch; null -> ActorConfig assert
+    fsdp_config:
+      model_dtype: bfloat16
   rollout:
     name: vllm
     log_prob_micro_batch_size_per_gpu: 1   # actor infer-mode (old-policy/ref logprob prefill) micro batch; required when use_dynamic_bsz=False
