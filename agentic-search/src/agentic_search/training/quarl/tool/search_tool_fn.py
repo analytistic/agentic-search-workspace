@@ -223,15 +223,15 @@ def perform_single_search_batch(
 
 
 @function_tool
-def search(query_list: list[str]) -> str:
+def search(query: str) -> str:
     """Searches the web for relevant information based on the given query.
 
     Args:
-        query_list: A list of fully-formed semantic queries. The tool will return search results for each query.
+        query: A single fully-formed semantic query. The tool will return search results for this query.
     """
     result_text, _ = perform_single_search_batch(
         retrieval_service_url=_retrieval_url(),
-        query_list=query_list,
+        query_list=[query],
         topk=TOPK,
         timeout=TIMEOUT,
     )

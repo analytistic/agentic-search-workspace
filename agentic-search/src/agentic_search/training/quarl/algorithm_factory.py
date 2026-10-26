@@ -27,8 +27,10 @@ _LEGACY_SEARCH_GUIDE_RE = re.compile(
     re.IGNORECASE,
 )
 _TOOL_CALL_GUIDE = (
-    "you can search by calling the search tool in this format: "
-    '<tool_call>{"name": "search", "arguments": {"query_list": ["<your query>"]}}</tool_call>. '
+    "you can search by emitting one <tool_call> block per query (each call "
+    'carries a single query): <tool_call>{"name": "search", "arguments": '
+    '{"query": "<your query>"}}</tool_call>. You can emit several tool calls '
+    "in one response to search different queries. "
     "Search results will be returned to you"
 )
 
