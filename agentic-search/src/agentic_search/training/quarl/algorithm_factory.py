@@ -4,6 +4,8 @@ The trainer orchestration remains in :mod:`quarl.main_rl`; this module owns
 the dataset/chat-template and reward-manager construction that varies by
 training algorithm.
 """
+import re
+
 from verl.trainer.ppo.ray_trainer import Role, ResourcePoolManager
 
 def _lazy_import(module_name: str, class_name: str):
@@ -12,6 +14,45 @@ def _lazy_import(module_name: str, class_name: str):
     import importlib
 
     return getattr(importlib.import_module(module_name), class_name)
+
+
+# Legacy Search-R1 data prompts teach the <search> tag protocol; with the
+# stock ToolAgentLoop (hermes <tool_call> JSON calling) the model must emit
+# a JSON tool call instead. Covers the two known legacy phrasings (nq_search /
+# qa_search_* and problem_extraction.py). Rewritten in create_rl_dataset,
+# idempotent, marker-based.
+_LEGACY_SEARCH_GUIDE_RE = re.compile(
+    r"you can call a search engine by <search> query </search>,?\s*"
+    r"and it will return the top searched results between <information> and </information>",
+    re.IGNORECASE,
+)
+_TOOL_CALL_GUIDE = (
+    "you can search by calling the search tool in this format: "
+    '<tool_call>{"name": "search", "arguments": {"query_list": ["<your query>"]}}</tool_call>. '
+    "Search results will be returned to you"
+)
+
+
+def _align_searchr1_prompt(prompt):
+    """Rewrite legacy <search>-tag guidance in user messages to JSON
+    tool-calling guidance (hermes <tool_call> format). Pure: returns a new
+    prompt when changed, the original object when not.
+    """
+    if not isinstance(prompt, list):
+        return prompt
+    new_prompt = None
+    for i, msg in enumerate(prompt):
+        if (
+            isinstance(msg, dict)
+            and msg.get("role") == "user"
+            and isinstance(msg.get("content"), str)
+        ):
+            content = _LEGACY_SEARCH_GUIDE_RE.sub(_TOOL_CALL_GUIDE, msg["content"], count=1)
+            if content != msg["content"]:
+                if new_prompt is None:
+                    new_prompt = list(prompt)
+                new_prompt[i] = {**msg, "content": content}
+    return new_prompt if new_prompt is not None else prompt
 
 
 def get_trainer_class(config):
@@ -130,6 +171,19 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
             converted.append(pq_path)
         else:
             converted.append(p)
+
+    # Legacy <search>-tag guidance -> hermes <tool_call> JSON, rewritten in
+    # place (idempotent: _align_searchr1_prompt is a no-op once the marker
+    # is gone, so this also covers already-aligned files cheaply).
+    for pq in converted:
+        df = pd.read_parquet(pq)
+        if "prompt" not in df.columns:
+            continue
+        aligned = df["prompt"].apply(_align_searchr1_prompt)
+        if not df["prompt"].equals(aligned):
+            print(f"[create_rl_dataset] aligning legacy search prompt: {pq}")
+            df["prompt"] = aligned
+            df.to_parquet(pq)
 
     # NOTE: no QSCT/chat-template injection here — verl 0.9.0's RLHFDataset
     # only returns raw_prompt (apply_chat_template moved to AgentLoop), and
