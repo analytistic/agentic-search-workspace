@@ -200,7 +200,7 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         if "prompt" not in df.columns:
             continue
         aligned = df["prompt"].apply(lambda p: _align_searchr1_prompt(p, tool_call_guide))
-        n_changed = int(sum(a != b for a, b in zip(df["prompt"], aligned)))
+        n_changed = sum(1 for a, b in zip(df["prompt"], aligned) if a != b)  # 有多少行 prompt 被改写
         print(f"[create_rl_dataset] prompt alignment {pq}: {n_changed}/{len(df)} rewritten")
         if n_changed == 0 and len(df):
             # Diagnose why nothing was rewritten: structure or wording mismatch.
