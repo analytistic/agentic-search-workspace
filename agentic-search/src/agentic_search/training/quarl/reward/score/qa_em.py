@@ -1,4 +1,4 @@
-from quarl.reward.score.search_r1_like_qa_em import search_r1_like_qa_em
+from quarl.reward.score.search_r1_like_qa_em import compute_score as em_compute_score
 from quarl.reward.score.process_score import (
     compute_think_length_penalty,
     extract_think_text,
@@ -11,7 +11,7 @@ from quarl.reward.score.process_score import (
 def compute_score(
     data_source, solution_str, ground_truth, extra_info=None, sandbox_fusion_url=None, concurrent_semaphore=None
 ):
-    res = search_r1_like_qa_em.compute_score(solution_str, ground_truth)
+    res = em_compute_score(solution_str, ground_truth)
 
     if isinstance(res, dict):
         return res
