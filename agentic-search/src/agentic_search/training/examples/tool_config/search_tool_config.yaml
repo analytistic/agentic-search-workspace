@@ -1,9 +1,7 @@
 tools:
   - class_name: quarl.tool.search_tool.QuarkSearchTool
     config:
-      retrieval_service_url:
-        default: "http://0.0.0.0:8000/retrieve"
-        wiki: "http://0.0.0.0:8000/retrieve"
+      retrieval_service_url: "http://${oc.env:SEARCH_IP,127.0.0.1}:${oc.env:SEARCH_PORT,8000}/retrieve"
       num_workers: 120
       rate_limit: 120
       timeout: 5000

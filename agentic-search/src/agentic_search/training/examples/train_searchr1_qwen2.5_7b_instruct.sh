@@ -48,7 +48,9 @@ RANK="${RANK:-0}"
 MASTER_ADDR="${MASTER_ADDR:-localhost}"
 MASTER_PORT="${MASTER_PORT:-6379}"
 NODE_IP="${NODE_IP:-127.0.0.1}"
-SEARCH_IP="${SEARCH_IP:-127.0.0.1}"
+# exported so ${oc.env:SEARCH_IP} interpolation in
+# examples/tool_config/search_tool_config.yaml resolves (QuarkSearchTool's URL)
+export SEARCH_IP="${SEARCH_IP:-127.0.0.1}"
 
 # ---- retrieval service (CPU mode on Ascend) ----
 RETRIEVER_ENABLE="${RETRIEVER_ENABLE:-1}"
@@ -57,7 +59,7 @@ RETRIEVER_INDEX_PATH="/data/xuwentao_data/wiki_2018/index/wiki-18-e5-index/e5_Fl
 RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/corpus/wiki_dump.jsonl"
 RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
-SEARCH_PORT="${SEARCH_PORT:-8000}"
+export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
 # ---- Ascend ----
 ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-6,7,14,15}"

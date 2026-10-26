@@ -8,7 +8,6 @@ import verl
 from verl import DataProto
 from verl.trainer.ppo.metric_utils import _compute_response_info, compute_data_metrics
 
-from quarl.tool.search_tool import USE_WIKI
 from quarl.utils.data_utils import extract_thought_and_answer
 
 

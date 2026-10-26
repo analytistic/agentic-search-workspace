@@ -3,11 +3,8 @@ import logging
 import os
 import threading
 from contextlib import ExitStack
-from enum import Enum
 from typing import Any, Callable, Optional, Tuple, TypeVar
 from uuid import uuid4
-
-T = TypeVar("T")
 
 import ray
 import ray.actor
@@ -20,29 +17,7 @@ from quarl.tool.search_r1_like_utils import perform_single_search_batch
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-USE_WIKI = [
-    "searchR1_nq",
-    "searchR1_triviaqa",
-    "searchR1_popqa",
-    "searchR1_hotpotqa",
-    "searchR1_2wikimultihopqa",
-    "searchR1_musique",
-    "searchR1_bamboogle",
-    "ssp_kg_selfplay_en",
-    "self_generated",
-    "ssp_kg_random_v1",
-    "ssp_kg_llm_v1",
-    "ssp_kg_llm_cl_v1",
-    "ssp_kg_random_v3",
-    "ssp_kg_random_v4",
-    "ssp_kg_random_v4p2",
-]
-
-
-class PoolMode(Enum):
-    """Execution pool mode."""
-
-    ThreadMode = "thread"
+T = TypeVar("T")
 
 
 class TokenBucketWorker:
@@ -128,15 +103,13 @@ class QuarkSearchTool(BaseTool):
             num_workers=self.num_workers,
             enable_global_rate_limit=self.enable_global_rate_limit,
             rate_limit=self.rate_limit,
-            mode=PoolMode.ThreadMode,
         )
 
-        # Retrieval service configuration
+        # Retrieval service configuration (flat URL string, resolved from
+        # ${oc.env:SEARCH_IP}/${oc.env:SEARCH_PORT} interpolation in the tool yaml)
         self.retrieval_service_url = config.get("retrieval_service_url")
         assert self.retrieval_service_url, "Configuration must include 'retrieval_service_url'"
         self.topk = config.get("topk", 3)
-        if self.retrieval_service_url == "":
-            raise ValueError("retrieval_service_url is not set")
 
         logger.info(f"Initialized QuarkSearchTool with config: {config}")
 
@@ -168,17 +141,14 @@ class QuarkSearchTool(BaseTool):
 
         Args:
             instance_id: The instance ID of the tool
-            parameters: Tool parameters containing query_list and optional timeout
+            parameters: Tool parameters containing query_list
 
         Returns: tool_response, tool_reward_score, tool_metrics
             tool_response: The response of the tool.
             tool_reward_score: The step reward score of the tool.
             tool_metrics: The metrics of the tool.
         """
-        timeout = self.timeout
         query_list_from_params = parameters.get("query_list")
-        datasource = parameters.get("data_source", None)
-        # print("[DebugSearchToolDataSource] data_source:", datasource)
 
         if not query_list_from_params or not isinstance(query_list_from_params, list):
             error_msg = "Error: 'query_list' is missing, empty, or not a list in parameters."
@@ -187,12 +157,13 @@ class QuarkSearchTool(BaseTool):
 
         # Execute search using Ray execution pool
         try:
-            # Always use wiki URL regardless of data_source to avoid routing
-            # to the default (0.0.0.0:8000) which may not have a running retriever.
-            retrieval_service_url_exe = self.retrieval_service_url.get("wiki")
-
             result_text, metadata = await self.execution_pool.execute.remote(
-                self.execute_search, instance_id, query_list_from_params, retrieval_service_url_exe, self.topk, timeout
+                self.execute_search,
+                instance_id,
+                query_list_from_params,
+                self.retrieval_service_url,
+                self.topk,
+                self.timeout,
             )
 
             # Store results in instance dictionary
@@ -213,10 +184,9 @@ class QuarkSearchTool(BaseTool):
             logger.error(f"[SearchTool] Execution failed: {e}")
             return ToolResponse(text=error_result), 0.0, {"error": str(e)}
 
-    async def calc_reward(self, instance_id: str, **kwargs) -> str:
+    async def calc_reward(self, instance_id: str, **kwargs) -> list:
         return self._instance_dict[instance_id]["reward"]
 
     async def release(self, instance_id: str, **kwargs) -> None:
         if instance_id in self._instance_dict:
             del self._instance_dict[instance_id]
-SSPSearchTool = QuarkSearchTool
