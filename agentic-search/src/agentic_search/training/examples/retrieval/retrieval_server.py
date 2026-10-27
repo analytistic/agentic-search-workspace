@@ -515,18 +515,35 @@ class DenseRetriever(BaseRetriever):
         logger.info("[load] corpus ready (%d docs, %.1fs)", len(self.corpus), time.time() - t0)
 
         t0 = time.time()
-        if config.index_mmap and not config.faiss_gpu:
-            self.index = _read_index_mmap(self.index_path)
-        else:
+        if config.faiss_device == "cpu":
+            self.index = _read_index_mmap(self.index_path) if config.index_mmap else faiss.read_index(self.index_path)
+            logger.info("[load] index done (%d vectors, %.1fs)", self.index.ntotal, time.time() - t0)
+        elif config.faiss_device == "gpu":
             self.index = faiss.read_index(self.index_path)
-        logger.info("[load] index done (%d vectors, %.1fs)", self.index.ntotal, time.time() - t0)
-
-        if config.faiss_gpu:
             co = faiss.GpuMultipleClonerOptions()
             co.useFloat16 = True
             co.shard = True
             self.index = faiss.index_cpu_to_all_gpus(self.index, co=co)
-            logger.info("[load] index moved to GPU")
+            logger.info("[load] index moved to GPU (%.1fs)", time.time() - t0)
+        elif config.faiss_device == "npu":
+            # Ascend faiss (https://gitcode.com/Ascend/faiss): copy the CPU
+            # Flat index onto one NPU. Logical device id follows
+            # ASCEND_RT_VISIBLE_DEVICES (pick an idle card in the launcher);
+            # the encoder's _device() uses the same env var.
+            if not hasattr(faiss, "NpuIndexFlat"):
+                raise RuntimeError(
+                    "--faiss-device npu requires the faiss_ascend wheel "
+                    "(pip install faiss_ascend-*.whl, uninstall faiss-cpu first); "
+                    "see https://gitcode.com/Ascend/faiss"
+                )
+            cpu_idx = faiss.read_index(self.index_path)
+            res = faiss.StandardNpuResources()
+            npu_config = faiss.NpuIndexFlatConfig()
+            npu_config.device = 0  # logical card id (ASCEND_RT_VISIBLE_DEVICES mapped)
+            self.index = faiss.NpuIndexFlat(res, cpu_idx, npu_config)  # metric follows the CPU index
+            logger.info("[load] index moved to NPU (%.1fs)", time.time() - t0)
+        else:
+            raise ValueError(f"unknown --faiss-device: {config.faiss_device!r}")
 
         t0 = time.time()
         self.encoder = Encoder(
@@ -595,7 +612,7 @@ class DenseRetriever(BaseRetriever):
 
     def info(self) -> Dict[str, Any]:
         info = super().info()
-        info.update({"ntotal": self.ntotal, "index_mmap": self.config.index_mmap, "faiss_gpu": self.config.faiss_gpu})
+        info.update({"ntotal": self.ntotal, "index_mmap": self.config.index_mmap, "faiss_device": self.config.faiss_device})
         return info
 
 
@@ -661,7 +678,7 @@ class Config:
         retrieval_topk: int = 10,
         index_path: str = "./index/bm25",
         corpus_path: str = "./data/corpus.jsonl",
-        faiss_gpu: bool = False,
+        faiss_device: str = "cpu",
         index_mmap: bool = True,
         retrieval_model_path: str = "./model",
         retrieval_pooling_method: str = "mean",
@@ -680,7 +697,7 @@ class Config:
         self.retrieval_topk = retrieval_topk
         self.index_path = index_path
         self.corpus_path = corpus_path
-        self.faiss_gpu = faiss_gpu
+        self.faiss_device = faiss_device
         self.index_mmap = index_mmap
         self.retrieval_model_path = retrieval_model_path
         self.retrieval_pooling_method = retrieval_pooling_method
@@ -867,7 +884,22 @@ def _build_parser():
     parser.add_argument(
         "--retriever_model", type=str, default="intfloat/e5-base-v2", help="Path of the dense retriever model."
     )
-    parser.add_argument("--faiss_gpu", action="store_true", help="Use GPU for faiss search")
+    parser.add_argument(
+        "--faiss-device",
+        type=str,
+        default="cpu",
+        choices=["cpu", "npu", "gpu"],
+        help=(
+            "Where to run faiss search: cpu (default, mmap), npu (Ascend "
+            "faiss; needs the faiss_ascend wheel + ASCEND_RT_VISIBLE_DEVICES "
+            "pointing at an idle card), gpu (CUDA)."
+        ),
+    )
+    parser.add_argument(
+        "--faiss_gpu",
+        action="store_true",
+        help=argparse.SUPPRESS,  # deprecated alias of --faiss-device gpu (run_common.sh)
+    )
     parser.add_argument(
         "--no-index-mmap",
         action="store_true",
@@ -914,7 +946,7 @@ def main(argv=None):
         index_path=args.index_path,
         corpus_path=args.corpus_path,
         retrieval_topk=args.topk,
-        faiss_gpu=args.faiss_gpu,
+        faiss_device=args.faiss_device if not args.faiss_gpu else "gpu",
         index_mmap=not args.no_index_mmap,
         retrieval_model_path=args.retriever_model,
         retrieval_pooling_method=args.pooling,
