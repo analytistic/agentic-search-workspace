@@ -134,7 +134,10 @@ fi
 # a fresh DB again. Export the variable so every process agrees.
 export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////tmp/mlruns.db}"
 if [ "$RANK" -eq 0 ]; then
-    rm -f /tmp/mlruns.db
+    # Do NOT rm the DB: once migrated, every new process's TrackingServiceClient
+    # runs alembic upgrade which is a no-op (driven by the alembic_version stamp),
+    # so all worker inits just connect. Only a MISSING db needs the single-process
+    # migration below (idempotent; retries until the version stamp exists).
     "$PYTHON" - <<'EOF'
 import mlflow, os, sqlite3, sys
 
