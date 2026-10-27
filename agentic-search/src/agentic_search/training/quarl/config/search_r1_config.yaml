@@ -67,6 +67,7 @@ actor_rollout_ref:
       max_assistant_turns: 10 # maximum assistant turns
       max_parallel_calls: 3   # multiple <search> blocks per round (one query each) execute in parallel
       max_tool_response_length: 8192   # cap tool-result characters at the whole generation window (== response_length): no eager truncation (SSP-style), the multi-turn total-length check guards the window
+      tool_response_truncate_side: right   # keep the head (top-k ranked docs) when truncating
       format: search   # SearchToolParser: legacy <search>query</search> tags (matches the training data prompts)
       enable: true # enable multi-turn rollout
       use_inference_chat_template: false # use inference chat template
