@@ -194,7 +194,8 @@ def create_rl_dataset_val(data_paths, config, tokenizer=None, processor=None):
     if processor is None:
         processor = hf_processor(local_path, use_fast=True)
 
-    max_per_source = int(config.data.get("max_samples_per_source", 0) or 0)
+    # pop: keep our custom field out of the data config handed to RLHFDataset
+    max_per_source = int(config.data.pop("max_samples_per_source", 0) or 0)
 
     # jsonl -> parquet on demand (same as create_rl_dataset)
     converted = []
