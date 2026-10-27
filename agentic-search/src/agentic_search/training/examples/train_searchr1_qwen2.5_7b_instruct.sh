@@ -66,10 +66,11 @@ RETRIEVER_INDEX_PATH="/data/xuwentao_data/wiki-18-e5-index/index"
 RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
 RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
-# Idle NPU for the retriever, OUTSIDE the training set (0-5,14,15). The
-# global ASCEND_VISIBLE_DEVICES above would otherwise hand the retriever the
-# training cards and it cannot be scheduled there (vLLM+FSDP own them).
-RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-6}"
+# Idle NPUs for the retriever, OUTSIDE the training set (0-5,14,15): the
+# remaining 6-13. The global ASCEND_VISIBLE_DEVICES above would otherwise
+# hand the retriever the training cards and it cannot be scheduled there
+# (vLLM+FSDP own them).
+RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-6,7,8,9,10,11,12,13}"
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
 # ---- Ascend ----
@@ -133,7 +134,8 @@ start_retriever() {
         --retriever_name e5 \
         --retriever_model "$RETRIEVER_MODEL_PATH" \
         --cache-entries 10000 \
-        --faiss-device npu &
+        --faiss-device npu \
+        --faiss-shard &
     return 0
 }
 
