@@ -66,6 +66,10 @@ RETRIEVER_INDEX_PATH="/data/xuwentao_data/wiki-18-e5-index/index"
 RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
 RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
+# Idle NPUs for the retriever, OUTSIDE the training set (0-5). The global
+# ASCEND_VISIBLE_DEVICES above would otherwise hand the retriever the
+# training cards and it cannot be scheduled there (vLLM+FSDP own them).
+RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-6,7}"
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
 # ---- Ascend ----
@@ -112,17 +116,21 @@ start_retriever() {
         fi
         sleep 1
     done
-    echo "==> starting retrieval service (CPU mode, logs to terminal)"
-    # encode is now globally serialized in the server (Encoder._lock), so give
-    # torch the full core count: one encode at a time uses all cores instead of
-    # crawling at OMP_NUM_THREADS=1. LRU cache absorbs repeated queries.
-    OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
+    echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to terminal)"
+    # Pin the retriever to idle cards OUTSIDE the training set: the global
+    # ASCEND_VISIBLE_DEVICES above would give it the training cards, and it
+    # cannot be scheduled there (vLLM+FSDP own them). Command-prefix env (no
+    # export) so the training launch below keeps the 0-5 visibility.
+    ASCEND_RT_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" \
+        OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
         --index_path "$RETRIEVER_INDEX_PATH" \
         --corpus_path "$RETRIEVER_CORPUS_PATH" \
         --topk "$RETRIEVER_TOPK" \
         --retriever_name e5 \
         --retriever_model "$RETRIEVER_MODEL_PATH" \
-        --cache-entries 10000 &
+        --cache-entries 10000 \
+        --faiss-device npu \
+        --faiss-shard &
     return 0
 }
 
