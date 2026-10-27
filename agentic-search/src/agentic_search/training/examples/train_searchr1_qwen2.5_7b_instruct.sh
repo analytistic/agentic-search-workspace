@@ -169,6 +169,12 @@ mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
 db_path = os.environ["MLFLOW_DB_PATH"]
 for attempt in range(5):
     try:
+        # A deleted experiment cannot be set active; restore it first so the
+        # existing history (traces/metrics) stays under the same name.
+        exp = mlflow.get_experiment_by_name('searchr1_grpo')
+        if exp is not None and exp.lifecycle_stage == 'deleted':
+            mlflow.restore_experiment(exp.experiment_id)
+            print(f'restored deleted experiment searchr1_grpo (id={exp.experiment_id})')
         mlflow.set_experiment('searchr1_grpo')  # triggers TrackingServiceClient -> alembic upgrade to heads
         con = sqlite3.connect(db_path)
         version = con.execute('SELECT version_num FROM alembic_version').fetchone()
