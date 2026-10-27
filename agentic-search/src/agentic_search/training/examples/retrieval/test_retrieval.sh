@@ -28,12 +28,11 @@ PORT="${PORT:-8000}"
 TOPK="${TOPK:-3}"
 
 # faiss search device: cpu (default fallback) | npu | gpu.
-# npu: --faiss-devices are LOGICAL card ids (replica mode, full base per
-# card); the PHYSICAL cards are chosen via ASCEND_RT_VISIBLE_DEVICES.
+# npu uses ALL visible cards (replica/shard auto-sized): only the PHYSICAL
+# cards need choosing, via ASCEND_RT_VISIBLE_DEVICES.
 FAISS_DEVICE="${FAISS_DEVICE:-npu}"
-FAISS_DEVICES="${FAISS_DEVICES:-0,1}"
 NPU_VISIBLE_DEVICES="${NPU_VISIBLE_DEVICES:-6,7}"
-FAISS_SHARD="${FAISS_SHARD:-1}"   # npu multi-card: 1 = shard 64G base across cards, 0 = replica
+FAISS_SHARD="${FAISS_SHARD:-1}"   # npu multi-card: 1 = shard base across cards, 0 = replica
 
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
@@ -84,20 +83,19 @@ done
     exit 1
 }
 
-# npu preflight: faiss_ascend installed + expected number of visible NPUs
+# npu preflight: faiss_ascend installed + at least one visible NPU
 if [ "$FAISS_DEVICE" = "npu" ]; then
     export ASCEND_RT_VISIBLE_DEVICES="$NPU_VISIBLE_DEVICES"
-    needed=$(printf '%s' "$FAISS_DEVICES" | tr ',' '\n' | wc -l | tr -d ' ')
-    if ! "$PYTHON" - "$needed" <<'PY'
+    if ! "$PYTHON" <<'PY'
 import faiss
 import sys
 
-if faiss.get_num_npus() < int(sys.argv[1]):
+if faiss.get_num_npus() < 1:
     sys.exit(1)
-print(f"faiss NPU ready: {faiss.get_num_npus()} device(s)")
+print(f"faiss NPU ready: {faiss.get_num_npus()} visible device(s)")
 PY
     then
-        echo "ERROR: faiss NPU preflight failed: expected >= $needed NPU(s) via"
+        echo "ERROR: faiss NPU preflight failed: no NPU visible via"
         echo "       ASCEND_RT_VISIBLE_DEVICES=$NPU_VISIBLE_DEVICES (install faiss_ascend wheel)"
         exit 1
     fi
@@ -154,7 +152,7 @@ echo "Model:  $MODEL"
 echo "Port:   $PORT"
 echo "Log:    $LOG"
 
-FAISS_ARGS=(--faiss-device "$FAISS_DEVICE" --faiss-devices "$FAISS_DEVICES")
+FAISS_ARGS=(--faiss-device "$FAISS_DEVICE")
 if [ "$FAISS_SHARD" = "1" ]; then
     FAISS_ARGS+=(--faiss-shard)
 fi

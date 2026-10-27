@@ -537,7 +537,12 @@ class DenseRetriever(BaseRetriever):
                     "see https://gitcode.com/Ascend/faiss"
                 )
             cpu_idx = faiss.read_index(self.index_path)
-            devs = [int(d) for d in (config.faiss_devices or "0").split(",") if d.strip()]
+            # logical ids are just the ASCEND_RT_VISIBLE_DEVICES mapping, so
+            # an empty list means "all visible NPUs" (get_num_npus() already
+            # counts only visible cards) -- no separate device config needed.
+            devs = [int(d) for d in (config.faiss_devices or "").split(",") if d.strip()]
+            if not devs:
+                devs = list(range(faiss.get_num_npus()))
             res = faiss.StandardNpuResources()
             if len(devs) == 1:
                 # single card: same cloner as the multi-card path below
@@ -701,7 +706,7 @@ class Config:
         index_path: str = "./index/bm25",
         corpus_path: str = "./data/corpus.jsonl",
         faiss_device: str = "cpu",
-        faiss_devices: str = "",  # npu only: comma-separated LOGICAL card ids (e.g. "0,1"); empty = device 0
+        faiss_devices: str = "",  # npu only: comma-separated LOGICAL card ids; empty = all visible NPUs
         faiss_shard: bool = False,  # npu multi-card: True = split base across cards (capacity), False = replica (throughput)
         index_mmap: bool = True,
         retrieval_model_path: str = "./model",
@@ -926,9 +931,10 @@ def _build_parser():
         type=str,
         default="",
         help=(
-            "npu only: comma-separated LOGICAL card ids, e.g. '0,1' (replica "
-            "mode: full base on each card). Physical cards are chosen via "
-            "ASCEND_RT_VISIBLE_DEVICES. Empty = device 0."
+            "npu only: comma-separated LOGICAL card ids, e.g. '0,1'. Empty "
+            "(default) = all visible NPUs (cards chosen via "
+            "ASCEND_RT_VISIBLE_DEVICES). Useful only to use a subset of the "
+            "visible cards."
         ),
     )
     parser.add_argument(
