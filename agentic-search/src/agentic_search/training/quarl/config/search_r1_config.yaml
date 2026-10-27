@@ -67,7 +67,7 @@ actor_rollout_ref:
       max_assistant_turns: 10 # maximum assistant turns
       max_parallel_calls: 3   # multiple <tool_call> blocks per round (one query each) execute in parallel
       max_tool_response_length: 512   # tool result truncation length (was SearchR1AgentLoop's max_obs_length=512)
-      format: hermes
+      format: search   # dual-format parser: <tool_call>{json}</tool_call> + legacy <search>query</search>
       enable: true # enable multi-turn rollout
       use_inference_chat_template: false # use inference chat template
       tokenization_sanity_check_mode: disable # disable tokenization sanity check

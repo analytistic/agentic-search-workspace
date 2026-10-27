@@ -18,6 +18,12 @@ from typing import Any, Optional
 import requests
 from verl.tools.function_tool import function_tool
 
+# Importing this registers the "search" tool parser (dual-format:
+# <tool_call>{json}</tool_call> + legacy <search>query</search>) with verl's
+# ToolParser registry — this file is executed by load_function_tools_from_path
+# in AgentLoopWorker.__init__, before ToolAgentLoop picks the parser.
+from quarl.agent_loop.tool_parser import SearchToolParser  # noqa: F401
+
 DEFAULT_TIMEOUT = 30  # Default search request timeout
 MAX_RETRIES = 10
 INITIAL_RETRY_DELAY = 1
