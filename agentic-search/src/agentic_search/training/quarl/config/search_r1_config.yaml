@@ -44,6 +44,10 @@ data:
   filter_overlong_prompts_workers: 8   # num_proc for the overlong-prompt filter (RLHFDataset.maybe_filter_out_long_prompts)
 
 actor_rollout_ref:
+  model:
+    enable_gradient_checkpointing: true   # explicit (default is also True)
+    override_config:
+      attn_implementation: flash_attention_2   # actor/ref transformers FA2 (needs bf16; NPU needs transformers-npu)
   actor:
     ppo_micro_batch_size_per_gpu: 1   # required when use_dynamic_bsz=False
     fsdp_config:
