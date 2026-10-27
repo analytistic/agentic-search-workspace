@@ -1008,7 +1008,15 @@ def main(argv=None):
     retriever = get_retriever(config)
     logger.info("[ready] %s", retriever.info())
 
-    uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level.lower())
+    # access_log=False: suppress the per-request "POST /retrieve 200" lines;
+    # our own logger.info output (load/ready/errors) still goes to the terminal.
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level=args.log_level.lower(),
+        access_log=False,
+    )
 
 
 if __name__ == "__main__":
