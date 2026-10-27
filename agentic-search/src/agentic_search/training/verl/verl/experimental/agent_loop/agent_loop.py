@@ -539,17 +539,10 @@ class AgentLoopWorker:
         # Load tools once per worker; each trajectory just reuses self.tools.
         tool_config_path = self.rollout_config.multi_turn.tool_config_path
         function_tool_path = self.rollout_config.multi_turn.function_tool_path
-        # TEMP-DEBUG: surface the worker-side values for tool loading
-        print(
-            f"[AgentLoopWorker] tool_config_path={tool_config_path!r} "
-            f"function_tool_path={function_tool_path!r}"
-        )
         self.tools = load_all_tools(
             tool_config_path=resolve_config_path(tool_config_path) if tool_config_path else None,
             function_tool_path=resolve_config_path(function_tool_path) if function_tool_path else None,
         )
-        print(f"[AgentLoopWorker] tools loaded: {[t.name for t in self.tools]}")
-        # END TEMP-DEBUG
 
         # Load custom agent loop implementations from config path
         agent_loop_config_path = self.rollout_config.agent.agent_loop_config_path
