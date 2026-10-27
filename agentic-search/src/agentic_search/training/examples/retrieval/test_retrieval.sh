@@ -43,8 +43,6 @@ CONCURRENCY_LEVELS="${CONCURRENCY_LEVELS:-10 30 60}"
 REPEATS="${REPEATS:-3}"
 WARMUP="${WARMUP:-1}"
 
-LOG="/tmp/retrieval_benchmark_${PORT}.log"
-
 BASE_URL="http://127.0.0.1:${PORT}"
 
 QUERY_POOL=(
@@ -150,7 +148,7 @@ echo "Index:  $INDEX"
 echo "Corpus: $CORPUS"
 echo "Model:  $MODEL"
 echo "Port:   $PORT"
-echo "Log:    $LOG"
+echo "Log:    terminal (stdout/stderr)"
 
 FAISS_ARGS=(--faiss-device "$FAISS_DEVICE")
 if [ "$FAISS_SHARD" = "1" ]; then
@@ -163,8 +161,7 @@ fi
     --topk "$TOPK" \
     --retriever_name e5 \
     --retriever_model "$MODEL" \
-    "${FAISS_ARGS[@]}" \
-    > "$LOG" 2>&1 &
+    "${FAISS_ARGS[@]}" &
 
 SERVER_PID=$!
 
@@ -197,7 +194,7 @@ while (( SECONDS - start_time < READY_TIMEOUT )); do
 
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
         echo "ERROR: Retriever process exited"
-        echo "Check log: $LOG"
+        echo "Check its output above (terminal)"
         exit 1
     fi
 
@@ -212,7 +209,7 @@ done
 
 if [ "$ready" -ne 1 ]; then
     echo "ERROR: Retriever readiness timeout"
-    echo "Check log: $LOG"
+    echo "Check its output above (terminal)"
     exit 1
 fi
 
@@ -426,4 +423,4 @@ done
 
 echo
 echo "========== Benchmark Completed =========="
-echo "Retriever log: $LOG"
+echo "Retriever log: scroll up (terminal)"
