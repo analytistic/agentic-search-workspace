@@ -245,6 +245,10 @@ class Encoder:
 
         self.model, self.tokenizer = load_model(model_path=model_path, use_fp16=use_fp16)
         self.model.eval()
+        # Self-check: print where the encoder actually landed (npu requires
+        # torch_npu in this process; falls back to cuda/mps/cpu otherwise).
+        p = next(self.model.parameters())
+        logger.info("[load] encoder model on %s, dtype %s (device()=%s)", p.device, p.dtype, _device())
         # Serialize encodes: concurrent requests would otherwise split the
         # OpenMP thread pool across processes-in-flight and each encode runs
         # at a fraction of the machine's speed. One batch at a time uses all
