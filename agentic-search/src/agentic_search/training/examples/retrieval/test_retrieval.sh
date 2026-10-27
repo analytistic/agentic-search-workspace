@@ -1,67 +1,45 @@
+
 #!/usr/bin/env bash
-# Retrieval server benchmark: batch-size matrix + concurrency matrix.
+# Search-R1 Retrieval Benchmark
 #
-# 1) 启动检索服务（CPU 模式）
-# 2) 等待 /status 就绪（每 5 秒刷新服务日志）
-# 3) 预热 1 轮（让模型/缓存热起来）
-# 4) 批量测速: 对每个 QUERY_SIZES 中的条数, 重复 REPEATS 次取平均
-# 5) 并发测速: 对每个 CONCURRENCY_LEVELS 中的并发数, 同时发 N 个请求测吞吐
-# 6) 自动停止服务
-#
-# 用法: 改【配置区】后执行: bash test_retrieval.sh
+# 1. 检查配置及端口
+# 2. 启动 CPU Retriever
+# 3. 等待 /status 返回 HTTP 200
+# 4. 预热
+# 5. Batch Size 测速
+# 6. 并发测速
+# 7. 自动关闭本次启动的服务
 
 set -euo pipefail
 
-# ---- 仓库根目录（脚本位于 <repo>/agentic-search/src/agentic_search/training/examples/retrieval/）----
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
+# ================= 配置区 =================
 
-# ========================== 配置区 ==========================
-# -----------------------------------------------------------
+PYTHON="/usr/local/python3.12.13/bin/python"
 
-# Python 解释器（服务器 user-local python；本地可用 uv/venv 路径覆盖）
-PYTHON="${PYTHON:-$HOME/.local/bin/python}"
+REPO_ROOT="/home/xuwentao/agentic-search-workspace"
 
-# 检索服务脚本所在目录
-SERVER_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training/examples/retrieval"
+SERVER="$REPO_ROOT/agentic-search/src/agentic_search/training/examples/retrieval/retrieval_server.py"
 
-# 索引文件（默认服务器全量：/data/xuwentao_data/wiki-18-e5-index/index）
 INDEX="${INDEX:-/data/xuwentao_data/wiki-18-e5-index/index}"
-
-# 语料文件（默认服务器全量：/data/xuwentao_data/wiki_2018/wiki-18.jsonl）
 CORPUS="${CORPUS:-/data/xuwentao_data/wiki_2018/wiki-18.jsonl}"
-
-# e5 编码模型路径
 MODEL="${MODEL:-/data/models/e5-base-v2/}"
 
-# 服务端口
-PORT="8000"
+PORT="${PORT:-8000}"
+TOPK="${TOPK:-3}"
 
-# 就绪超时（秒）：服务器全量加载 10-20 分钟；demo 几秒
-READY_TIMEOUT="1800"
+READY_TIMEOUT="${READY_TIMEOUT:-1800}"
+CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
 
-# ---- 测速场景设置 ----
-
-# 批量测速：每请求塞多少条 query（空格分隔，逐个测）
-QUERY_SIZES="1 3 5 8"
-
-# async 并发测速：同时发多少个请求（每个请求 1 条 query，用 httpx.AsyncClient）
-# 注：服务端 /retrieve 是同步端点（FastAPI 线程池），高并发可能触达 torch 前向的线程安全上限
+QUERY_SIZES="${QUERY_SIZES:-1 3 5 8}"
 CONCURRENCY_LEVELS="${CONCURRENCY_LEVELS:-3 5 10}"
 
-# 每个场景重复几次取平均
-REPEATS="3"
+REPEATS="${REPEATS:-3}"
+WARMUP="${WARMUP:-1}"
 
-# 预热轮数（不计入统计，让模型/缓存热起来）
-WARMUP="1"
+LOG="/tmp/retrieval_benchmark_${PORT}.log"
 
-# 每个请求的 curl 超时（秒）——请求挂起时不阻塞整个测速，超时记为失败
-CURL_TIMEOUT="60"
+BASE_URL="http://127.0.0.1:${PORT}"
 
-# 每批返回 top-k 条
-TOPK="3"
-
-# ---- 查询池（测速用的 query，按需增删）----
 QUERY_POOL=(
     "Who founded the University of Cambridge?"
     "What is the capital of France?"
@@ -72,119 +50,348 @@ QUERY_POOL=(
     "Shakespeare most famous plays"
     "Silicon Valley tech companies"
 )
-# ============================================================
 
-LOG="/tmp/retrieval_test.log"
+# ================= 环境检查 =================
 
-# 从查询池取前 N 条，生成 JSON 请求体（查询池通过环境变量 QPOOL 注入）
-make_payload() {
-    python3 - "$1" "$TOPK" <<'EOF'
-import json, os, sys
-n, topk = int(sys.argv[1]), int(sys.argv[2])
-pool = json.loads(os.environ["QPOOL"])
-print(json.dumps({"queries": pool[:n], "topk": topk, "return_scores": True}))
-EOF
+export OMP_NUM_THREADS=1
+export TOKENIZERS_PARALLELISM=false
+export PYTHONUNBUFFERED=1
+
+# 禁止本地请求走代理
+export NO_PROXY="localhost,127.0.0.1"
+export no_proxy="$NO_PROXY"
+
+echo "========== Environment Check =========="
+
+for path in "$PYTHON" "$SERVER" "$INDEX" "$CORPUS" "$MODEL"; do
+    if [ ! -e "$path" ]; then
+        echo "ERROR: Path not found: $path"
+        exit 1
+    fi
+done
+
+"$PYTHON" -c "import httpx" || {
+    echo "ERROR: httpx is not installed"
+    exit 1
 }
 
-export QPOOL="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${QUERY_POOL[@]}")"
+if [ "${#QUERY_POOL[@]}" -lt 1 ]; then
+    echo "ERROR: Empty query pool"
+    exit 1
+fi
 
-echo "==> 启动 CPU 检索服务（无 --faiss_gpu）..."
-# OMP_NUM_THREADS=1: 避免 macOS 上 torch+faiss 线程冲突；Linux 无害
-# PYTHONUNBUFFERED=1: 服务日志实时落盘
-OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$SERVER_DIR/retrieval_server.py" \
+# 防止重复启动 Retriever
+if ss -ltn | grep -qE ":${PORT}[[:space:]]"; then
+    echo "ERROR: Port ${PORT} is already occupied"
+    ss -lntp | grep ":${PORT}" || true
+    exit 1
+fi
+
+# ================= 服务管理 =================
+
+SERVER_PID=""
+
+cleanup() {
+    echo
+    echo "========== Cleanup =========="
+
+    if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "Stopping Retriever PID=$SERVER_PID"
+
+        kill -TERM "$SERVER_PID" 2>/dev/null || true
+
+        for _ in $(seq 1 10); do
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+                break
+            fi
+            sleep 1
+        done
+
+        wait "$SERVER_PID" 2>/dev/null || true
+    fi
+
+    echo "Cleanup finished"
+}
+
+trap cleanup EXIT INT TERM
+
+# ================= 启动服务 =================
+
+echo
+echo "========== Starting Retriever =========="
+
+echo "Index:  $INDEX"
+echo "Corpus: $CORPUS"
+echo "Model:  $MODEL"
+echo "Port:   $PORT"
+echo "Log:    $LOG"
+
+"$PYTHON" "$SERVER" \
     --index_path "$INDEX" \
     --corpus_path "$CORPUS" \
     --topk "$TOPK" \
     --retriever_name e5 \
-    --retriever_model "$MODEL" > "$LOG" 2>&1 &
-SERVER_PID=$!
-trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+    --retriever_model "$MODEL" \
+    > "$LOG" 2>&1 &
 
-echo "==> 等待就绪（每 5 秒刷新服务日志；超时 ${READY_TIMEOUT}s）..."
+SERVER_PID=$!
+
+echo "Retriever PID=$SERVER_PID"
+
+# ================= 等待就绪 =================
+
+echo
+echo "========== Waiting for /status =========="
+
 ready=0
-for i in $(seq 1 "$READY_TIMEOUT"); do
-    if curl -fsS -o /dev/null "http://localhost:$PORT/status" 2>/dev/null; then
+start_time=$SECONDS
+
+while (( SECONDS - start_time < READY_TIMEOUT )); do
+
+    http_code=$(curl \
+        --noproxy '*' \
+        -sS \
+        --connect-timeout 2 \
+        --max-time 5 \
+        -o /dev/null \
+        -w '%{http_code}' \
+        "$BASE_URL/status" 2>/dev/null) || true
+
+    if [ "$http_code" = "200" ]; then
         ready=1
-        echo "    就绪（${i}s）"
+        echo "Retriever ready!"
         break
     fi
-    if [ $((i % 5)) -eq 0 ]; then
-        last_line="$(tail -1 "$LOG" 2>/dev/null | tr -d '\r' | sed 's/^ *//;s/ *$//')"
-        [ -n "$last_line" ] && echo "    [${i}s] $last_line"
+
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "ERROR: Retriever process exited"
+        echo "Check log: $LOG"
+        exit 1
     fi
+
+    elapsed=$((SECONDS - start_time))
+
+    if (( elapsed % 10 == 0 )); then
+        echo "Waiting... ${elapsed}s / ${READY_TIMEOUT}s"
+    fi
+
     sleep 1
 done
+
 if [ "$ready" -ne 1 ]; then
-    echo "服务未就绪，日志尾部："
-    tail -5 "$LOG"
+    echo "ERROR: Retriever readiness timeout"
+    echo "Check log: $LOG"
     exit 1
 fi
 
-# 单次请求耗时（毫秒），返回响应体（变量 RESULT_BODY）
+# ================= 生成请求 =================
+
+export QPOOL="$(
+    "$PYTHON" -c \
+    'import json,sys; print(json.dumps(sys.argv[1:]))' \
+    "${QUERY_POOL[@]}"
+)"
+
+make_payload() {
+    "$PYTHON" - "$1" "$TOPK" <<'PY'
+import json
+import os
+import sys
+
+n = int(sys.argv[1])
+topk = int(sys.argv[2])
+pool = json.loads(os.environ["QPOOL"])
+
+queries = [pool[i % len(pool)] for i in range(n)]
+
+print(json.dumps({
+    "queries": queries,
+    "topk": topk,
+    "return_scores": True
+}))
+PY
+}
+
+# ================= 单次请求测速 =================
+
 request_ms() {
     local payload="$1"
     local start_ns end_ns
-    start_ns=$(python3 -c 'import time; print(time.time_ns())')
-    RESULT_BODY="$(curl -s --max-time "$CURL_TIMEOUT" -X POST "http://localhost:$PORT/retrieve" \
-        -H "Content-Type: application/json" -d "$payload")"
-    end_ns=$(python3 -c 'import time; print(time.time_ns())')
-    echo $(( (end_ns - start_ns) / 1000000 ))
+
+    start_ns=$("$PYTHON" -c \
+        'import time; print(time.perf_counter_ns())')
+
+    if ! curl \
+        --noproxy '*' \
+        -fsS \
+        --connect-timeout 5 \
+        --max-time "$CURL_TIMEOUT" \
+        -o /dev/null \
+        -X POST "$BASE_URL/retrieve" \
+        -H "Content-Type: application/json" \
+        -d "$payload"; then
+
+        echo "ERROR: Retrieval request failed" >&2
+        return 1
+    fi
+
+    end_ns=$("$PYTHON" -c \
+        'import time; print(time.perf_counter_ns())')
+
+    echo $(((end_ns - start_ns) / 1000000))
 }
 
-echo "==> 预热（${WARMUP} 轮）..."
-for _ in $(seq 1 "${WARMUP:-1}"); do
+# ================= 预热 =================
+
+echo
+echo "========== Warmup =========="
+
+for ((i=1; i<=WARMUP; i++)); do
     request_ms "$(make_payload 1)" > /dev/null
+    echo "Warmup $i/$WARMUP done"
 done
-echo "    预热完成"
+
+# ================= Batch 测速 =================
 
 echo
-echo "================ 批量测速（每请求 N 条 query）================"
-printf "%-14s %-12s %-14s %-14s\n" "每条数" "平均耗时(ms)" "每query(ms)" "吞吐(q/s)"
+echo "========== Batch Benchmark =========="
+
+printf "%-10s %-15s %-15s %-15s\n" \
+    "Batch" "Avg(ms)" "P95(ms)" "QPS"
+
 for size in $QUERY_SIZES; do
-    total=0
-    for _ in $(seq 1 "$REPEATS"); do
-        ms=$(request_ms "$(make_payload "$size")")
-        total=$((total + ms))
+
+    payload=$(make_payload "$size")
+    times=()
+
+    for ((i=1; i<=REPEATS; i++)); do
+        ms=$(request_ms "$payload")
+        times+=("$ms")
     done
-    avg=$((total / REPEATS))
-    per_query=$((avg / size))
-    qps=$((size * 1000 / avg))
-    printf "%-14s %-12s %-14s %-14s\n" "$size" "$avg" "$per_query" "$qps"
+
+    printf '%s\n' "${times[@]}" | \
+        "$PYTHON" -c '
+import sys
+import math
+
+times = [int(x) for x in sys.stdin if x.strip()]
+batch = int(sys.argv[1])
+
+avg = sum(times) / len(times)
+sorted_times = sorted(times)
+p95 = sorted_times[math.ceil(0.95 * len(times)) - 1]
+
+qps = batch * 1000 / avg if avg > 0 else 0
+
+print(f"{batch:<10} {avg:<15.2f} {p95:<15.2f} {qps:<15.2f}")
+' "$size"
+
 done
 
+# ================= 并发测速 =================
+
 echo
-echo "================ async 并发测速（N 个并发请求，每请求 1 条 query）================"
-printf "%-14s %-16s %-14s %-16s\n" "并发数" "总耗时(ms)" "每请求(ms)" "吞吐(req/s)"
-for n in $CONCURRENCY_LEVELS; do
-    "$PYTHON" - "$n" "$TOPK" "$PORT" "$(make_payload 1)" <<'EOF'
-import asyncio, json, sys, time
+echo "========== Concurrency Benchmark =========="
 
-level, topk, port = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
-payload = json.loads(sys.argv[4])
-url = f"http://localhost:{port}/retrieve"
+printf "%-12s %-15s %-15s %-15s %-15s\n" \
+    "Concurrency" "Avg(ms)" "P95(ms)" "Total(ms)" "QPS"
 
+for level in $CONCURRENCY_LEVELS; do
+
+    "$PYTHON" - \
+        "$level" \
+        "$REPEATS" \
+        "$PORT" \
+        "$TOPK" \
+        "$CURL_TIMEOUT" <<'PY'
+
+import asyncio
+import json
+import math
+import os
+import sys
+import time
+
+import httpx
+
+level = int(sys.argv[1])
+repeats = int(sys.argv[2])
+port = int(sys.argv[3])
+topk = int(sys.argv[4])
+timeout = int(sys.argv[5])
+
+pool = json.loads(os.environ["QPOOL"])
+
+url = f"http://127.0.0.1:{port}/retrieve"
 
 async def main():
-    import httpx
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    latencies = []
+    total_queries = 0
+    total_wall_time = 0.0
 
-        async def one():
-            r = await client.post(url, json=payload)
-            return r.status_code
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        trust_env=False
+    ) as client:
 
-        t0 = time.time()
-        statuses = await asyncio.gather(*[one() for _ in range(level)])
-        total_ms = (time.time() - t0) * 1000
+        async def one(query):
+            payload = {
+                "queries": [query],
+                "topk": topk,
+                "return_scores": True
+            }
 
-    per_req = total_ms / level
-    rps = level / (total_ms / 1000)
-    print(f"{level:<14} {total_ms:<16.0f} {per_req:<14.0f} {rps:<16.2f}  (status={sorted(set(statuses))})")
+            t0 = time.perf_counter()
 
+            response = await client.post(
+                url,
+                json=payload
+            )
+
+            response.raise_for_status()
+
+            return (time.perf_counter() - t0) * 1000
+
+        for repeat in range(repeats):
+
+            queries = [
+                pool[(repeat * level + i) % len(pool)]
+                for i in range(level)
+            ]
+
+            t0 = time.perf_counter()
+
+            results = await asyncio.gather(
+                *[one(q) for q in queries]
+            )
+
+            wall_time = time.perf_counter() - t0
+
+            latencies.extend(results)
+            total_queries += len(queries)
+            total_wall_time += wall_time
+
+    avg = sum(latencies) / len(latencies)
+
+    ordered = sorted(latencies)
+    p95 = ordered[math.ceil(0.95 * len(ordered)) - 1]
+
+    qps = total_queries / total_wall_time
+
+    print(
+        f"{level:<12} "
+        f"{avg:<15.2f} "
+        f"{p95:<15.2f} "
+        f"{total_wall_time * 1000:<15.2f} "
+        f"{qps:<15.2f}"
+    )
 
 asyncio.run(main())
-EOF
+PY
+
 done
 
 echo
-echo "==> 完成，服务已停止"
+echo "========== Benchmark Completed =========="
+echo "Retriever log: $LOG"
