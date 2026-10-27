@@ -27,6 +27,13 @@ MODEL="${MODEL:-/data/models/e5-base-v2/}"
 PORT="${PORT:-8000}"
 TOPK="${TOPK:-3}"
 
+# faiss search device: cpu (default fallback) | npu | gpu.
+# npu: --faiss-devices are LOGICAL card ids (replica mode, full base per
+# card); the PHYSICAL cards are chosen via ASCEND_RT_VISIBLE_DEVICES.
+FAISS_DEVICE="${FAISS_DEVICE:-npu}"
+FAISS_DEVICES="${FAISS_DEVICES:-0,1}"
+NPU_VISIBLE_DEVICES="${NPU_VISIBLE_DEVICES:-6,7}"
+
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
 
@@ -75,6 +82,25 @@ done
     echo "ERROR: httpx is not installed"
     exit 1
 }
+
+# npu preflight: faiss_ascend installed + expected number of visible NPUs
+if [ "$FAISS_DEVICE" = "npu" ]; then
+    export ASCEND_RT_VISIBLE_DEVICES="$NPU_VISIBLE_DEVICES"
+    needed=$(printf '%s' "$FAISS_DEVICES" | tr ',' '\n' | wc -l | tr -d ' ')
+    if ! "$PYTHON" - "$needed" <<'PY'
+import faiss
+import sys
+
+if faiss.get_num_npus() < int(sys.argv[1]):
+    sys.exit(1)
+print(f"faiss NPU ready: {faiss.get_num_npus()} device(s)")
+PY
+    then
+        echo "ERROR: faiss NPU preflight failed: expected >= $needed NPU(s) via"
+        echo "       ASCEND_RT_VISIBLE_DEVICES=$NPU_VISIBLE_DEVICES (install faiss_ascend wheel)"
+        exit 1
+    fi
+fi
 
 if [ "${#QUERY_POOL[@]}" -lt 1 ]; then
     echo "ERROR: Empty query pool"
@@ -133,6 +159,8 @@ echo "Log:    $LOG"
     --topk "$TOPK" \
     --retriever_name e5 \
     --retriever_model "$MODEL" \
+    --faiss-device "$FAISS_DEVICE" \
+    --faiss-devices "$FAISS_DEVICES" \
     > "$LOG" 2>&1 &
 
 SERVER_PID=$!

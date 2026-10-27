@@ -537,10 +537,25 @@ class DenseRetriever(BaseRetriever):
                     "see https://gitcode.com/Ascend/faiss"
                 )
             cpu_idx = faiss.read_index(self.index_path)
+            devs = [int(d) for d in (config.faiss_devices or "0").split(",") if d.strip()]
             res = faiss.StandardNpuResources()
-            npu_config = faiss.NpuIndexFlatConfig()
-            npu_config.device = 0  # logical card id (ASCEND_RT_VISIBLE_DEVICES mapped)
-            self.index = faiss.NpuIndexFlat(res, cpu_idx, npu_config)  # metric follows the CPU index
+            if len(devs) == 1:
+                npu_config = faiss.NpuIndexFlatConfig()
+                npu_config.device = devs[0]  # logical card id (ASCEND_RT_VISIBLE_DEVICES mapped)
+                self.index = faiss.NpuIndexFlat(res, cpu_idx, npu_config)  # metric follows the CPU index
+            else:
+                # replica mode (shard=False): full base on each card -> higher
+                # throughput; search fans the batch out and merges.
+                vres = faiss.NpuResourcesVector()
+                vdev = faiss.Int32Vector()
+                for d in devs:
+                    vres.push_back(res)
+                    vdev.push_back(d)
+                co = faiss.NpuMultipleClonerOptions()
+                co.shard = False
+                co.storageType = 0  # Float16
+                self.index = faiss.index_cpu_to_npu_multiple(vres, vdev, cpu_idx, co)
+                logger.info("[load] index replicated across NPUs %s", devs)
             logger.info("[load] index moved to NPU (%.1fs)", time.time() - t0)
         else:
             raise ValueError(f"unknown --faiss-device: {config.faiss_device!r}")
@@ -679,6 +694,7 @@ class Config:
         index_path: str = "./index/bm25",
         corpus_path: str = "./data/corpus.jsonl",
         faiss_device: str = "cpu",
+        faiss_devices: str = "",  # npu only: comma-separated LOGICAL card ids (e.g. "0,1"); empty = device 0
         index_mmap: bool = True,
         retrieval_model_path: str = "./model",
         retrieval_pooling_method: str = "mean",
@@ -698,6 +714,7 @@ class Config:
         self.index_path = index_path
         self.corpus_path = corpus_path
         self.faiss_device = faiss_device
+        self.faiss_devices = faiss_devices
         self.index_mmap = index_mmap
         self.retrieval_model_path = retrieval_model_path
         self.retrieval_pooling_method = retrieval_pooling_method
@@ -896,6 +913,16 @@ def _build_parser():
         ),
     )
     parser.add_argument(
+        "--faiss-devices",
+        type=str,
+        default="",
+        help=(
+            "npu only: comma-separated LOGICAL card ids, e.g. '0,1' (replica "
+            "mode: full base on each card). Physical cards are chosen via "
+            "ASCEND_RT_VISIBLE_DEVICES. Empty = device 0."
+        ),
+    )
+    parser.add_argument(
         "--faiss_gpu",
         action="store_true",
         help=argparse.SUPPRESS,  # deprecated alias of --faiss-device gpu (run_common.sh)
@@ -947,6 +974,7 @@ def main(argv=None):
         corpus_path=args.corpus_path,
         retrieval_topk=args.topk,
         faiss_device=args.faiss_device if not args.faiss_gpu else "gpu",
+        faiss_devices=args.faiss_devices,
         index_mmap=not args.no_index_mmap,
         retrieval_model_path=args.retriever_model,
         retrieval_pooling_method=args.pooling,
