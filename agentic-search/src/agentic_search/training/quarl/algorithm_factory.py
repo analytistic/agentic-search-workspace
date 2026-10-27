@@ -45,28 +45,35 @@ _TOOL_CALL_GUIDE = _tool_call_guide(1)  # default; create_rl_dataset rebuilds it
 
 
 def _align_searchr1_prompt(prompt, tool_call_guide: str = _TOOL_CALL_GUIDE):
-    """Rewrite legacy <search>-tag guidance in user messages to JSON
-    tool-calling guidance (hermes <tool_call> format). Pure: returns a new
-    prompt when changed, the original object when not. Accepts a list or a
-    numpy array (parquet may materialize the column as an object array).
+    """Align a data prompt for the search_r1 tool pipeline.
+
+    - drops role=system messages (ssp-style "You are a helpful and harmless
+      assistant." does not fit the search_r1 format; the template default
+      renders instead, matching the training data)
+    - rewrites legacy <search>-tag guidance in user messages to JSON
+      tool-calling guidance (hermes <tool_call> format)
+
+    Pure: returns a new prompt when changed, the original object when not.
+    Accepts a list or a numpy array (parquet may materialize the column as
+    an object array).
     """
     if isinstance(prompt, np.ndarray):
         prompt = prompt.tolist()
     if not isinstance(prompt, list):
         return prompt
-    new_prompt = None
-    for i, msg in enumerate(prompt):
-        if (
-            isinstance(msg, dict)
-            and msg.get("role") == "user"
-            and isinstance(msg.get("content"), str)
-        ):
+    changed = False
+    out = []
+    for msg in prompt:
+        if isinstance(msg, dict) and msg.get("role") == "system":
+            changed = True
+            continue
+        if isinstance(msg, dict) and msg.get("role") == "user" and isinstance(msg.get("content"), str):
             content = _LEGACY_SEARCH_GUIDE_RE.sub(tool_call_guide, msg["content"], count=1)
             if content != msg["content"]:
-                if new_prompt is None:
-                    new_prompt = list(prompt)
-                new_prompt[i] = {**msg, "content": content}
-    return new_prompt if new_prompt is not None else prompt
+                changed = True
+                msg = {**msg, "content": content}
+        out.append(msg)
+    return out if changed else prompt
 
 
 def _prompt_changed(a, b) -> bool:
@@ -223,11 +230,9 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
                         old = old.tolist()
                     if isinstance(new, np.ndarray):
                         new = new.tolist()
-                    oc = old[0].get("content", "") if old and isinstance(old[0], dict) else str(old)
-                    nc = new[0].get("content", "") if new and isinstance(new[0], dict) else str(new)
                     print(f"[create_rl_dataset] example rewrite (row {i}):")
-                    print(f"  before: {oc}")
-                    print(f"  after : {nc}")
+                    print(f"  before: {old!r}")
+                    print(f"  after : {new!r}")
                     printed += 1
                     if printed >= 3:
                         break
