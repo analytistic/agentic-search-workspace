@@ -19,8 +19,8 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../../.." && pwd)}"
 # ========================== 配置区 ==========================
 # -----------------------------------------------------------
 
-# Python 解释器（uv 项目环境；服务器上可按需换成绝对路径）
-PYTHON="$REPO_ROOT/agentic-search/.venv/bin/python"
+# Python 解释器（服务器 user-local python；本地可用 uv/venv 路径覆盖）
+PYTHON="${PYTHON:-$HOME/.local/bin/python}"
 
 # 检索服务脚本所在目录
 SERVER_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training/examples/retrieval"
