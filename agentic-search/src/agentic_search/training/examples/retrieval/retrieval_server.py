@@ -540,9 +540,10 @@ class DenseRetriever(BaseRetriever):
             devs = [int(d) for d in (config.faiss_devices or "0").split(",") if d.strip()]
             res = faiss.StandardNpuResources()
             if len(devs) == 1:
-                npu_config = faiss.NpuIndexFlatConfig()
-                npu_config.device = devs[0]  # logical card id (ASCEND_RT_VISIBLE_DEVICES mapped)
-                self.index = faiss.NpuIndexFlat(res, cpu_idx, npu_config)  # metric follows the CPU index
+                # single card: same cloner as the multi-card path below
+                opts = faiss.NpuClonerOptions()
+                opts.storageType = 0  # Float16
+                self.index = faiss.index_cpu_to_npu(res, devs[0], cpu_idx, opts)
             else:
                 # shard=True: split the base across cards -> capacity (for
                 # indexes bigger than one card's HBM). shard=False (replica):
