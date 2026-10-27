@@ -126,11 +126,13 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         processor = hf_processor(local_path, use_fast=True)
 
     # RLHFDataset needs parquet; convert .jsonl inputs to .parquet on demand.
+    # Re-convert when the jsonl is newer than the parquet (source may have
+    # changed; a stale conversion would silently train/val on old data).
     converted = []
     for p in [str(x) for x in data_paths]:
         if p.endswith(".jsonl"):
             pq_path = p[: -len(".jsonl")] + ".parquet"
-            if not os.path.exists(pq_path):
+            if (not os.path.exists(pq_path)) or os.path.getmtime(pq_path) < os.path.getmtime(p):
                 print(f"[create_rl_dataset] converting {p} -> {pq_path}")
                 pd.read_json(p, lines=True).to_parquet(pq_path)
             converted.append(pq_path)
@@ -197,12 +199,13 @@ def create_rl_dataset_val(data_paths, config, tokenizer=None, processor=None):
     # pop: keep our custom field out of the data config handed to RLHFDataset
     max_per_source = int(config.data.pop("max_samples_per_source", 0) or 0)
 
-    # jsonl -> parquet on demand (same as create_rl_dataset)
+    # jsonl -> parquet on demand (same as create_rl_dataset; re-convert when
+    # the jsonl is newer than the parquet)
     converted = []
     for p in [str(x) for x in data_paths]:
         if p.endswith(".jsonl"):
             pq_path = p[: -len(".jsonl")] + ".parquet"
-            if not os.path.exists(pq_path):
+            if (not os.path.exists(pq_path)) or os.path.getmtime(pq_path) < os.path.getmtime(p):
                 print(f"[create_rl_dataset_val] converting {p} -> {pq_path}")
                 pd.read_json(p, lines=True).to_parquet(pq_path)
             converted.append(pq_path)
@@ -211,27 +214,29 @@ def create_rl_dataset_val(data_paths, config, tokenizer=None, processor=None):
 
     if max_per_source > 0:
         # stratified subsample: at most max_per_source rows per data_source
+        # Always overwrite the cache: the source data may have changed since
+        # the last run (e.g. re-downloaded), a stale subset would silently
+        # evaluate old questions.
         first = str(converted[0])
         out_pq = os.path.join(
             os.path.dirname(first),
             f"{os.path.splitext(os.path.basename(first))[0]}_sub{max_per_source}.parquet",
         )
-        if not os.path.exists(out_pq):
-            seed = int(config.data.get("seed", 1) or 1)
-            frames = []
-            for pq in converted:
-                df = pd.read_parquet(pq)
-                if "data_source" in df.columns:
-                    for _, g in df.groupby("data_source"):
-                        frames.append(g.sample(n=min(max_per_source, len(g)), random_state=seed))
-                else:
-                    frames.append(df.sample(n=min(max_per_source, len(df)), random_state=seed))
-            subset = pd.concat(frames, ignore_index=True)
-            subset.to_parquet(out_pq)
-            print(
-                f"[create_rl_dataset_val] wrote stratified subset {out_pq} "
-                f"({len(subset)} rows, <= {max_per_source}/source)"
-            )
+        seed = int(config.data.get("seed", 1) or 1)
+        frames = []
+        for pq in converted:
+            df = pd.read_parquet(pq)
+            if "data_source" in df.columns:
+                for _, g in df.groupby("data_source"):
+                    frames.append(g.sample(n=min(max_per_source, len(g)), random_state=seed))
+            else:
+                frames.append(df.sample(n=min(max_per_source, len(df)), random_state=seed))
+        subset = pd.concat(frames, ignore_index=True)
+        subset.to_parquet(out_pq)
+        print(
+            f"[create_rl_dataset_val] wrote stratified subset {out_pq} "
+            f"({len(subset)} rows, <= {max_per_source}/source)"
+        )
         converted = [out_pq]
 
     rl_dataset = RLHFDataset(
