@@ -113,12 +113,16 @@ start_retriever() {
         sleep 1
     done
     echo "==> starting retrieval service (CPU mode, logs to terminal)"
-    OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
+    # encode is now globally serialized in the server (Encoder._lock), so give
+    # torch the full core count: one encode at a time uses all cores instead of
+    # crawling at OMP_NUM_THREADS=1. LRU cache absorbs repeated queries.
+    OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
         --index_path "$RETRIEVER_INDEX_PATH" \
         --corpus_path "$RETRIEVER_CORPUS_PATH" \
         --topk "$RETRIEVER_TOPK" \
         --retriever_name e5 \
-        --retriever_model "$RETRIEVER_MODEL_PATH" &
+        --retriever_model "$RETRIEVER_MODEL_PATH" \
+        --cache-entries 10000 &
     return 0
 }
 

@@ -245,9 +245,18 @@ class Encoder:
 
         self.model, self.tokenizer = load_model(model_path=model_path, use_fp16=use_fp16)
         self.model.eval()
+        # Serialize encodes: concurrent requests would otherwise split the
+        # OpenMP thread pool across processes-in-flight and each encode runs
+        # at a fraction of the machine's speed. One batch at a time uses all
+        # cores; faiss search stays outside the lock and still overlaps.
+        self._lock = threading.Lock()
 
     @torch.no_grad()
     def encode(self, query_list: List[str], is_query=True) -> np.ndarray:
+        with self._lock:
+            return self._encode_locked(query_list, is_query)
+
+    def _encode_locked(self, query_list: List[str], is_query=True) -> np.ndarray:
         if isinstance(query_list, str):
             query_list = [query_list]
 

@@ -53,13 +53,14 @@ QUERY_POOL=(
 
 # ================= 环境检查 =================
 
-export OMP_NUM_THREADS=1
-export TOKENIZERS_PARALLELISM=false
-export PYTHONUNBUFFERED=1
-
 # 禁止本地请求走代理
 export NO_PROXY="localhost,127.0.0.1"
 export no_proxy="$NO_PROXY"
+
+# encode 已在服务端串行化；放开 OMP 让单次 encode 吃满全核
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}"
+export TOKENIZERS_PARALLELISM=false
+export PYTHONUNBUFFERED=1
 
 echo "========== Environment Check =========="
 
