@@ -196,8 +196,12 @@ def create_rl_dataset_val(data_paths, config, tokenizer=None, processor=None):
     if processor is None:
         processor = hf_processor(local_path, use_fast=True)
 
-    # pop: keep our custom field out of the data config handed to RLHFDataset
-    max_per_source = int(config.data.pop("max_samples_per_source", 0) or 0)
+    # Read the custom field WITHOUT popping it: RLHFDataset consumes
+    # config.data purely via .get() (see verl/utils/dataset/rl_dataset.py),
+    # so the extra key is ignored anyway, and pop() on the shared OmegaConf
+    # DictConfig mutated the config (checkpoint dump / re-init on resume saw
+    # a config without the field -> stratification silently disabled).
+    max_per_source = int(config.data.get("max_samples_per_source", 0) or 0)
 
     # jsonl -> parquet on demand (same as create_rl_dataset; re-convert when
     # the jsonl is newer than the parquet)
