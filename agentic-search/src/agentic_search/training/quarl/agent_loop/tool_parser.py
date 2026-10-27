@@ -30,16 +30,19 @@ class SearchToolParser(ToolParser):
 
         self.tool_call_start_token: str = "<search>"
         self.tool_call_end_token: str = "</search>"
+        self.eos_token: str = tokenizer.eos_token
         self.tool_call_regex = regex.compile(r"<search>(.*?)</search>", regex.DOTALL)
 
     @rollout_trace_op
     async def extract_tool_calls(
         self, responses_ids: list[int], tools: list = None
     ) -> tuple[str, list[FunctionCall]]:
+        del tools
         loop = get_event_loop()
-        text = await loop.run_in_executor(None, self.tokenizer.decode, responses_ids)
-        if self.tool_call_start_token not in text or self.tool_call_end_token not in text:
-            return text, []
+        text = await loop.run_in_executor(None, lambda: self.tokenizer.decode(responses_ids, skip_special_tokens=False))
+        for token in (self.tokenizer.pad_token, self.eos_token):
+            if token:
+                text = text.replace(token, "")
 
         matches = self.tool_call_regex.findall(text)
         function_calls = []

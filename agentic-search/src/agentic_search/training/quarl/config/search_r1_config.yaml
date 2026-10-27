@@ -65,16 +65,16 @@ actor_rollout_ref:
       max_samples_per_step_per_worker: 16   # cap trace volume per worker per step
     multi_turn:
       max_assistant_turns: 10 # maximum assistant turns
-      max_parallel_calls: 3   # multiple <tool_call> blocks per round (one query each) execute in parallel
-      max_tool_response_length: 512   # tool result truncation length (was SearchR1AgentLoop's max_obs_length=512)
-      format: search   # dual-format parser: <tool_call>{json}</tool_call> + legacy <search>query</search>
+      max_parallel_calls: 3   # multiple <search> blocks per round (one query each) execute in parallel
+      max_tool_response_length: 8192   # cap tool-result characters at the whole generation window (== response_length): no eager truncation (SSP-style), the multi-turn total-length check guards the window
+      format: search   # SearchToolParser: legacy <search>query</search> tags (matches the training data prompts)
       enable: true # enable multi-turn rollout
       use_inference_chat_template: false # use inference chat template
       tokenization_sanity_check_mode: disable # disable tokenization sanity check
       function_tool_path: ${oc.env:WORKSPACE}/quarl/tool/search_tool_fn.py
-  agent:
-    default_agent_loop: tool_agent   # verl stock ToolAgentLoop (JSON tool calling, search = only tool)
-    agent_loop_config_path: null
+    agent:
+      default_agent_loop: tool_agent   # verl stock ToolAgentLoop (JSON tool calling, search = only tool)
+      agent_loop_config_path: null
 
 
 

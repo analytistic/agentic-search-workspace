@@ -18,10 +18,10 @@ from typing import Any, Optional
 import requests
 from verl.tools.function_tool import function_tool
 
-# Importing this registers the "search" tool parser (dual-format:
-# <tool_call>{json}</tool_call> + legacy <search>query</search>) with verl's
-# ToolParser registry — this file is executed by load_function_tools_from_path
-# in AgentLoopWorker.__init__, before ToolAgentLoop picks the parser.
+# Importing this registers the "search" tool parser (legacy <search>query</search>
+# tag format) with verl's ToolParser registry — this file is executed by
+# load_function_tools_from_path in AgentLoopWorker.__init__, before
+# ToolAgentLoop picks the parser.
 from quarl.agent_loop.tool_parser import SearchToolParser  # noqa: F401
 
 DEFAULT_TIMEOUT = 30  # Default search request timeout
@@ -235,10 +235,15 @@ def search(query: str) -> str:
     Args:
         query: A single fully-formed semantic query. The tool will return search results for this query.
     """
-    result_text, _ = perform_single_search_batch(
+    result_text, metadata = perform_single_search_batch(
         retrieval_service_url=_retrieval_url(),
         query_list=[query],
         topk=TOPK,
         timeout=TIMEOUT,
     )
-    return result_text
+    # Align with the Search-R1/SSP observation format: the data prompts teach
+    # "results arrive between <information> and </information>", so wrap the
+    # plain-text doc list (metadata["formatted_result"] already strips the
+    # {"result": ...} JSON shell) in those tags for the model to see.
+    formatted = metadata.get("formatted_result") or result_text
+    return f"<information>\n{formatted}\n</information>"

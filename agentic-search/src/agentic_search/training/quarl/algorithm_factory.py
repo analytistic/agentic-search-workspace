@@ -3,10 +3,12 @@
 The trainer orchestration remains in :mod:`quarl.main_rl`; this module owns
 the dataset/chat-template and reward-manager construction that varies by
 training algorithm.
-"""
-import re
 
-import numpy as np
+No prompt alignment is applied to the data: the legacy Search-R1 prompts
+already teach the <search> tag protocol, which matches our SearchToolParser
+(``multi_turn.format: search``), so prompts pass through untouched (train
+data has no system message; eval data keeps its own).
+"""
 
 from verl.trainer.ppo.ray_trainer import Role, ResourcePoolManager
 
@@ -16,73 +18,6 @@ def _lazy_import(module_name: str, class_name: str):
     import importlib
 
     return getattr(importlib.import_module(module_name), class_name)
-
-
-# Legacy Search-R1 data prompts teach the <search> tag protocol; with the
-# stock ToolAgentLoop (hermes <tool_call> JSON calling) the model must emit
-# a JSON tool call instead. Covers the two known legacy phrasings (nq_search /
-# qa_search_* and problem_extraction.py). Rewritten in create_rl_dataset,
-# idempotent, marker-based.
-_LEGACY_SEARCH_GUIDE_RE = re.compile(
-    r"you can call a search engine by <search> query </search>,?\s*"
-    r"and it will return the top searched results between <information> and </information>",
-    re.IGNORECASE,
-)
-def _tool_call_guide(max_parallel_calls: int) -> str:
-    """Build the tool-calling guidance text, reflecting the config's
-    per-round tool-call cap (multi_turn.max_parallel_calls)."""
-    return (
-        "you can search by emitting one <tool_call> block per query (each call "
-        'carries a single query): <tool_call>{"name": "search", "arguments": '
-        '{"query": "<your query>"}}</tool_call>. '
-        f"You can emit up to {max_parallel_calls} tool calls in one response "
-        "to search different queries. "
-        "Search results will be returned to you"
-    )
-
-
-_TOOL_CALL_GUIDE = _tool_call_guide(1)  # default; create_rl_dataset rebuilds it from config
-
-
-def _align_searchr1_prompt(prompt, tool_call_guide: str = _TOOL_CALL_GUIDE):
-    """Align a data prompt for the search_r1 tool pipeline.
-
-    - drops role=system messages (ssp-style "You are a helpful and harmless
-      assistant." does not fit the search_r1 format; the template default
-      renders instead, matching the training data)
-    - rewrites legacy <search>-tag guidance in user messages to JSON
-      tool-calling guidance (hermes <tool_call> format)
-
-    Pure: returns a new prompt when changed, the original object when not.
-    Accepts a list or a numpy array (parquet may materialize the column as
-    an object array).
-    """
-    if isinstance(prompt, np.ndarray):
-        prompt = prompt.tolist()
-    if not isinstance(prompt, list):
-        return prompt
-    changed = False
-    out = []
-    for msg in prompt:
-        if isinstance(msg, dict) and msg.get("role") == "system":
-            changed = True
-            continue
-        if isinstance(msg, dict) and msg.get("role") == "user" and isinstance(msg.get("content"), str):
-            content = _LEGACY_SEARCH_GUIDE_RE.sub(tool_call_guide, msg["content"], count=1)
-            if content != msg["content"]:
-                changed = True
-                msg = {**msg, "content": content}
-        out.append(msg)
-    return out if changed else prompt
-
-
-def _prompt_changed(a, b) -> bool:
-    """Compare two prompt values (lists or numpy arrays) for inequality."""
-    if isinstance(a, np.ndarray):
-        a = a.tolist()
-    if isinstance(b, np.ndarray):
-        b = b.tolist()
-    return a != b
 
 
 def get_trainer_class(config):
@@ -202,12 +137,6 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
         else:
             converted.append(p)
 
-    # Legacy <search>-tag guidance -> hermes <tool_call> JSON, rewritten in
-    # place (idempotent: _align_searchr1_prompt is a no-op once the marker
-    # is gone, so this also covers already-aligned files cheaply).
-    max_parallel_calls = config.actor_rollout_ref.rollout.multi_turn.get("max_parallel_calls", 1)
-    tool_call_guide = _tool_call_guide(max_parallel_calls)
-
     # Self-check: the tool file must exist for the rollout workers to load it.
     ftp = config.actor_rollout_ref.rollout.multi_turn.get("function_tool_path", None)
     if ftp:
@@ -216,42 +145,30 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
     else:
         print("[create_rl_dataset] WARNING: no function_tool_path configured -> rollout will have NO tools")
 
-    for pq in converted:
-        df = pd.read_parquet(pq)
-        if "prompt" not in df.columns:
-            continue
-        aligned = df["prompt"].apply(lambda p: _align_searchr1_prompt(p, tool_call_guide))
-        if any(_prompt_changed(a, b) for a, b in zip(df["prompt"], aligned)):
-            # Print a few before/after examples of the rewrite.
-            printed = 0
-            for i, (old, new) in enumerate(zip(df["prompt"], aligned)):
-                if _prompt_changed(old, new):
-                    if isinstance(old, np.ndarray):
-                        old = old.tolist()
-                    if isinstance(new, np.ndarray):
-                        new = new.tolist()
-                    print(f"[create_rl_dataset] example rewrite (row {i}):")
-                    print(f"  before: {old!r}")
-                    print(f"  after : {new!r}")
-                    printed += 1
-                    if printed >= 3:
-                        break
-            df["prompt"] = aligned
-            df.to_parquet(pq)
-
     # NOTE: no QSCT/chat-template injection here — verl 0.9.0's RLHFDataset
     # only returns raw_prompt (apply_chat_template moved to AgentLoop), and
     # the rollout renders messages with the model's default chat template
     # (format guidance lives in the data prompt).
 
-    dataset_cls = RLHFDataset
-    print(f"Using dataset class: {dataset_cls.__name__}")
-    return dataset_cls(
+    rl_dataset = RLHFDataset(
         data_files=converted,
         tokenizer=tokenizer,
         processor=processor,
         config=config.data,
     )
+
+    # Self-check: print the created dataset's info and the first few full
+    # samples (raw_prompt = messages as stored, before any chat template).
+    print(f"[create_rl_dataset] RLHFDataset: {len(rl_dataset)} samples, files={converted}")
+    for i in range(min(2, len(rl_dataset))):
+        sample = rl_dataset[i]
+        prompt = sample.get("raw_prompt")
+        roles = [m.get("role") for m in prompt]
+        print(f"  example {i}: {len(prompt)} messages, roles={roles}")
+        for msg in prompt[:2]:
+            print(f"    [{msg.get('role')}] {msg.get('content')!r}")
+
+    return rl_dataset
 
 def create_rl_sampler(data_config, dataset):
     """Create a sampler for the dataset.
