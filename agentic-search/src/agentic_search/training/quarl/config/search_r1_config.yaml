@@ -12,8 +12,6 @@ trainer:
 
 algorithm:
   name: search_r1
-  rollout_format: hermes
-  chat_template: default
   adv_estimator: grpo
 
 # verl 0.9.0 reward stack: config.reward drives RewardLoopManager.
