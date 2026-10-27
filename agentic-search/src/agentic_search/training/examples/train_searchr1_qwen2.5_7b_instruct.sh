@@ -187,6 +187,7 @@ if [ "$RANK" -eq 0 ]; then
         data.filter_overlong_prompts=True \
         data.truncation='left' \
         actor_rollout_ref.model.path="$MODEL_PATH" \
+        actor_rollout_ref.model.custom_chat_template="$(cat "$TRAINING_DIR/quarl/template/search_r1.jinja")" \
         actor_rollout_ref.actor.optim.lr="$LR" \
         actor_rollout_ref.actor.use_kl_loss=True \
         actor_rollout_ref.actor.strategy=fsdp \
