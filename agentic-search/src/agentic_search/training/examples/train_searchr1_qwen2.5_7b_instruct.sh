@@ -127,12 +127,18 @@ fi
 # process; upgrade is idempotent (driven by the alembic_version table), so a
 # fully-migrated DB makes all later worker inits a no-op. Do the whole migration
 # in this single process and verify the version stamp before proceeding.
+# NOTE: workers read MLFLOW_TRACKING_URI (rollout_trace.py) and default to
+# "sqlite:////tmp/mlruns.db" (4 slashes = ABSOLUTE path /tmp/mlruns.db). The
+# pre-init must use the exact same URI: "sqlite:///tmp/mlruns.db" (3 slashes)
+# points at ${CWD}/tmp/mlruns.db -- a DIFFERENT file, so workers would race on
+# a fresh DB again. Export the variable so every process agrees.
+export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////tmp/mlruns.db}"
 if [ "$RANK" -eq 0 ]; then
     rm -f /tmp/mlruns.db
     "$PYTHON" - <<'EOF'
-import mlflow, sqlite3, sys
+import mlflow, os, sqlite3, sys
 
-mlflow.set_tracking_uri('sqlite:///tmp/mlruns.db')
+mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
 for attempt in range(5):
     try:
         mlflow.set_experiment('searchr1_grpo')  # triggers TrackingServiceClient -> alembic upgrade to heads
@@ -144,7 +150,7 @@ for attempt in range(5):
             break
     except Exception as e:
         print(f'mlflow init attempt {attempt}: {e}', file=sys.stderr)
-        mlflow.set_tracking_uri('sqlite:///tmp/mlruns.db')
+        mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
 else:
     sys.exit('mlflow db init failed after retries')
 EOF
