@@ -123,14 +123,31 @@ if [ "$RANK" -eq 0 ] && [ "$RETRIEVER_ENABLE" = "1" ]; then
 fi
 
 # ---- mlflow trace db (pre-init so AgentLoopWorkers don't race the alembic migration) ----
+# mlflow creates a TrackingServiceClient (and runs alembic upgrade) in every new
+# process; upgrade is idempotent (driven by the alembic_version table), so a
+# fully-migrated DB makes all later worker inits a no-op. Do the whole migration
+# in this single process and verify the version stamp before proceeding.
 if [ "$RANK" -eq 0 ]; then
     rm -f /tmp/mlruns.db
-    "$PYTHON" -c "
-import mlflow
+    "$PYTHON" - <<'EOF'
+import mlflow, sqlite3, sys
+
 mlflow.set_tracking_uri('sqlite:///tmp/mlruns.db')
-mlflow.set_experiment('searchr1_grpo')
-print('mlflow db ready')
-"
+for attempt in range(5):
+    try:
+        mlflow.set_experiment('searchr1_grpo')  # triggers TrackingServiceClient -> alembic upgrade to heads
+        con = sqlite3.connect('/tmp/mlruns.db')
+        version = con.execute('SELECT version_num FROM alembic_version').fetchone()
+        con.close()
+        if version is not None:
+            print(f'mlflow db ready (alembic version={version[0]})')
+            break
+    except Exception as e:
+        print(f'mlflow init attempt {attempt}: {e}', file=sys.stderr)
+        mlflow.set_tracking_uri('sqlite:///tmp/mlruns.db')
+else:
+    sys.exit('mlflow db init failed after retries')
+EOF
 fi
 
 # ---- Ray cluster ----
