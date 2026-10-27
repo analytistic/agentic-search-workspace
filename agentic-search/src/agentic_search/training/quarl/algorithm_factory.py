@@ -170,6 +170,88 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
 
     return rl_dataset
 
+
+def create_rl_dataset_val(data_paths, config, tokenizer=None, processor=None):
+    """Create the VALIDATION RL dataset: at most ``data.max_samples_per_source``
+    samples per ``data_source`` (0/absent = keep all).
+
+    Same pipeline as :func:`create_rl_dataset` plus a stratified subsample
+    drawn per data_source with the data seed. The subset is cached next to the
+    input as ``<stem>_sub<max>.parquet`` (deterministic seed -> same draw on
+    every launch), so repeated val runs reuse the identical question set.
+    """
+    import os
+    import pandas as pd
+    from verl.utils import hf_processor, hf_tokenizer
+    from verl.utils.dataset.rl_dataset import RLHFDataset
+    from verl.utils.fs import copy_to_local
+
+    local_path = copy_to_local(config.actor_rollout_ref.model.path)
+    trust_remote_code = config.data.get("trust_remote_code", False)
+
+    if tokenizer is None:
+        tokenizer = hf_tokenizer(local_path, trust_remote_code=trust_remote_code)
+    if processor is None:
+        processor = hf_processor(local_path, use_fast=True)
+
+    max_per_source = int(config.data.get("max_samples_per_source", 0) or 0)
+
+    # jsonl -> parquet on demand (same as create_rl_dataset)
+    converted = []
+    for p in [str(x) for x in data_paths]:
+        if p.endswith(".jsonl"):
+            pq_path = p[: -len(".jsonl")] + ".parquet"
+            if not os.path.exists(pq_path):
+                print(f"[create_rl_dataset_val] converting {p} -> {pq_path}")
+                pd.read_json(p, lines=True).to_parquet(pq_path)
+            converted.append(pq_path)
+        else:
+            converted.append(p)
+
+    if max_per_source > 0:
+        # stratified subsample: at most max_per_source rows per data_source
+        first = str(converted[0])
+        out_pq = os.path.join(
+            os.path.dirname(first),
+            f"{os.path.splitext(os.path.basename(first))[0]}_sub{max_per_source}.parquet",
+        )
+        if not os.path.exists(out_pq):
+            seed = int(config.data.get("seed", 1) or 1)
+            frames = []
+            for pq in converted:
+                df = pd.read_parquet(pq)
+                if "data_source" in df.columns:
+                    for _, g in df.groupby("data_source"):
+                        frames.append(g.sample(n=min(max_per_source, len(g)), random_state=seed))
+                else:
+                    frames.append(df.sample(n=min(max_per_source, len(df)), random_state=seed))
+            subset = pd.concat(frames, ignore_index=True)
+            subset.to_parquet(out_pq)
+            print(
+                f"[create_rl_dataset_val] wrote stratified subset {out_pq} "
+                f"({len(subset)} rows, <= {max_per_source}/source)"
+            )
+        converted = [out_pq]
+
+    rl_dataset = RLHFDataset(
+        data_files=converted,
+        tokenizer=tokenizer,
+        processor=processor,
+        config=config.data,
+    )
+
+    # Self-check: print dataset info and the first few full samples.
+    print(f"[create_rl_dataset_val] RLHFDataset: {len(rl_dataset)} samples, files={converted}")
+    for i in range(min(2, len(rl_dataset))):
+        sample = rl_dataset[i]
+        prompt = sample.get("raw_prompt")
+        roles = [m.get("role") for m in prompt]
+        print(f"  example {i}: {len(prompt)} messages, roles={roles}")
+        for msg in prompt[:2]:
+            print(f"    [{msg.get('role')}] {msg.get('content')!r}")
+
+    return rl_dataset
+
 def create_rl_sampler(data_config, dataset):
     """Create a sampler for the dataset.
 
@@ -295,7 +377,7 @@ def build_trainer(
     from verl.utils.dataset.rl_dataset import collate_fn
 
     train_dataset = create_rl_dataset(config.data.train_files, config, tokenizer=tokenizer, processor=processor)
-    val_dataset = create_rl_dataset(config.data.val_files, config, tokenizer=tokenizer, processor=processor)
+    val_dataset = create_rl_dataset_val(config.data.val_files, config, tokenizer=tokenizer, processor=processor)
     train_sampler = create_rl_sampler(config.data, train_dataset)
     return trainer_cls(
         config=config,
