@@ -133,8 +133,8 @@ fi
 # ("sqlite:///tmp/mlruns.db") points at ${CWD}/tmp/mlruns.db -- a DIFFERENT
 # file, so workers would race on a fresh DB again. Export the variable so
 # every process agrees.
-export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////data/xuwentao_data/mlruns.db}"
-export MLFLOW_DB_PATH="${MLFLOW_DB_PATH:-/data/xuwentao_data/mlruns.db}"
+export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////data/mlruns.db}"
+export MLFLOW_DB_PATH="${MLFLOW_DB_PATH:-/data/mlruns.db}"
 if [ "$RANK" -eq 0 ]; then
     mkdir -p "$(dirname "$MLFLOW_DB_PATH")"
     # Do NOT rm the DB: once migrated, every new process's TrackingServiceClient
