@@ -41,6 +41,7 @@ retriever:
 data:
   max_start_length: 4096
   dataloader_num_workers: 4
+  filter_overlong_prompts_workers: 8   # num_proc for the overlong-prompt filter (RLHFDataset.maybe_filter_out_long_prompts)
 
 actor_rollout_ref:
   actor:
