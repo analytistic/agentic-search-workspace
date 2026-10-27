@@ -66,11 +66,12 @@ RETRIEVER_INDEX_PATH="/data/xuwentao_data/wiki-18-e5-index/index"
 RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
 RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
-# Idle NPUs for the retriever, OUTSIDE the training set (0-5,14,15): the
-# remaining 6-13. The global ASCEND_VISIBLE_DEVICES above would otherwise
-# hand the retriever the training cards and it cannot be scheduled there
-# (vLLM+FSDP own them).
-RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-6,7,8,9,10,11,12,13}"
+# The retriever shares the 8 TRAINING cards (0-5,14,15): faiss shards the
+# index across them, living in the idle HBM left by vLLM's
+# gpu_memory_utilization=0.5 (~2GB fp16 per card). Pin the same set on both
+# visibility vars so faiss_ascend (reads ASCEND_VISIBLE_DEVICES) and
+# torch_npu (prefers ASCEND_RT_VISIBLE_DEVICES) agree.
+RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-0,1,2,3,4,5,14,15}"
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
 # ---- Ascend ----
@@ -121,12 +122,12 @@ start_retriever() {
         fi
         sleep 1
     done
-    echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to terminal)"
-    # Pin the retriever to idle cards OUTSIDE the training set: the global
-    # ASCEND_VISIBLE_DEVICES above would give it the training cards, and it
-    # cannot be scheduled there (vLLM+FSDP own them). Command-prefix env (no
-    # export) so the training launch below keeps the 0-5,14,15 visibility.
-    ASCEND_RT_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" \
+    echo "==> starting retrieval service (npu mode sharing training cards $RETRIEVER_NPU_DEVICES, logs to terminal)"
+    # Pin BOTH visibility vars to the same card set: faiss_ascend
+    # (CANN/AscendC ops) reads ASCEND_VISIBLE_DEVICES while torch_npu prefers
+    # ASCEND_RT_VISIBLE_DEVICES. Command-prefix env (no export) so the
+    # training launch below keeps its own visibility.
+    ASCEND_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" ASCEND_RT_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" \
         OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
         --index_path "$RETRIEVER_INDEX_PATH" \
         --corpus_path "$RETRIEVER_CORPUS_PATH" \
