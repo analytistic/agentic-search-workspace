@@ -66,23 +66,21 @@ RETRIEVER_INDEX_PATH="/data/xuwentao_data/wiki-18-e5-index/index"
 RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
 RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
-# The retriever shares the 8 TRAINING cards (0-5,14,15): faiss shards the
-# index across them, living in the idle HBM left by vLLM's
-# gpu_memory_utilization=0.5 (~2GB fp16 per card). Pin the same set on both
-# visibility vars so faiss_ascend (reads ASCEND_VISIBLE_DEVICES) and
-# torch_npu (prefers ASCEND_RT_VISIBLE_DEVICES) agree.
-RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-0,1,2,3,4,5,14,15}"
+# Retriever NPUs: die 4,5 (NPU2), fully separate from the 4 training cards.
+# Pin both visibility vars so faiss_ascend (reads ASCEND_VISIBLE_DEVICES)
+# and torch_npu (prefers ASCEND_RT_VISIBLE_DEVICES) agree.
+RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-4,5}"
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
 # ---- Ascend ----
-# 8 training cards (0-5 + 14,15; 6 is kept for the retriever).
-ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3,4,5,14,15}"
-N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
+# 4 training cards (die 0-3 = NPU0/1); retriever gets die 4,5 (NPU2).
+# die 6-13 (NPU3-6) are occupied by other processes, die 14,15 spare.
+ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3}"
+N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-4}"
 
 # ---- training hyperparams ----
-# 8 training cards (0-5,14,15): 256*5=1280 % 8 = 0 so the verl
-# divisibility assert (train_batch_size * rollout_n % n_gpus == 0)
-# passes with the original sizes again.
+# 4 training cards (die 0-3 = NPU0/1): 256*5=1280 % 4 = 0 so the verl
+# divisibility assert passes with the original sizes.
 BATCH_SIZE="${BATCH_SIZE:-256}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
@@ -95,7 +93,7 @@ LR="${LR:-1e-6}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
-VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"   # 64*5=320 % 8 = 0
+VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"   # 64*5=320 % 4 = 0
 VAL_ONLY="${VAL_ONLY:-False}"
 
 # ============================================================
@@ -122,9 +120,10 @@ start_retriever() {
         fi
         sleep 1
     done
-    echo "==> starting retrieval service (npu mode sharing training cards $RETRIEVER_NPU_DEVICES, logs to terminal)"
-    # Pin BOTH visibility vars to the same card set: faiss_ascend
-    # (CANN/AscendC ops) reads ASCEND_VISIBLE_DEVICES while torch_npu prefers
+    echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to terminal)"
+    # Retriever lives on its own NPUs (die 4,5), fully separate from the
+    # training cards. Pin BOTH visibility vars: faiss_ascend (CANN/AscendC
+    # ops) reads ASCEND_VISIBLE_DEVICES while torch_npu prefers
     # ASCEND_RT_VISIBLE_DEVICES. Command-prefix env (no export) so the
     # training launch below keeps its own visibility.
     ASCEND_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" ASCEND_RT_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" \
