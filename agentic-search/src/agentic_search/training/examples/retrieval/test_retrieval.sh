@@ -25,14 +25,14 @@ PYTHON="$REPO_ROOT/agentic-search/.venv/bin/python"
 # 检索服务脚本所在目录
 SERVER_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training/examples/retrieval"
 
-# 索引文件（demo 用 e5_demo.index；服务器全量用 e5_HNSW64.index）
-INDEX="$REPO_ROOT/data/wiki-demo/e5_demo.index"
+# 索引文件（服务器全量：/data/xuwentao_data/wiki-18-e5-index/index）
+INDEX="/data/xuwentao_data/wiki-18-e5-index/index"
 
-# 语料文件（demo 用 wiki-demo；服务器全量用 wiki-18.jsonl）
-CORPUS="$REPO_ROOT/data/wiki-demo/corpus.jsonl"
+# 语料文件（服务器全量：/data/xuwentao_data/wiki_2018/wiki-18.jsonl）
+CORPUS="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
 
 # e5 编码模型路径
-MODEL="$REPO_ROOT/data/wiki_2018/model/intfloat/e5-base-v2"
+MODEL="/data/models/e5-base-v2/"
 
 # 服务端口
 PORT="8000"
