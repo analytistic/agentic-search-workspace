@@ -537,12 +537,10 @@ class DenseRetriever(BaseRetriever):
                     "see https://gitcode.com/Ascend/faiss"
                 )
             cpu_idx = faiss.read_index(self.index_path)
-            # logical ids are just the ASCEND_RT_VISIBLE_DEVICES mapping, so
-            # an empty list means "all visible NPUs" (get_num_npus() already
-            # counts only visible cards) -- no separate device config needed.
-            devs = [int(d) for d in (config.faiss_devices or "").split(",") if d.strip()]
-            if not devs:
-                devs = list(range(faiss.get_num_npus()))
+            # All visible NPUs: logical ids are just the ASCEND_RT_VISIBLE_DEVICES
+            # mapping, so use every visible card (get_num_npus() counts only
+            # visible cards) -- choose the cards via that env var instead.
+            devs = list(range(faiss.get_num_npus()))
             res = faiss.StandardNpuResources()
             if len(devs) == 1:
                 # single card: same cloner as the multi-card path below
@@ -706,7 +704,6 @@ class Config:
         index_path: str = "./index/bm25",
         corpus_path: str = "./data/corpus.jsonl",
         faiss_device: str = "cpu",
-        faiss_devices: str = "",  # npu only: comma-separated LOGICAL card ids; empty = all visible NPUs
         faiss_shard: bool = False,  # npu multi-card: True = split base across cards (capacity), False = replica (throughput)
         index_mmap: bool = True,
         retrieval_model_path: str = "./model",
@@ -727,7 +724,6 @@ class Config:
         self.index_path = index_path
         self.corpus_path = corpus_path
         self.faiss_device = faiss_device
-        self.faiss_devices = faiss_devices
         self.faiss_shard = faiss_shard
         self.index_mmap = index_mmap
         self.retrieval_model_path = retrieval_model_path
@@ -927,22 +923,11 @@ def _build_parser():
         ),
     )
     parser.add_argument(
-        "--faiss-devices",
-        type=str,
-        default="",
-        help=(
-            "npu only: comma-separated LOGICAL card ids, e.g. '0,1'. Empty "
-            "(default) = all visible NPUs (cards chosen via "
-            "ASCEND_RT_VISIBLE_DEVICES). Useful only to use a subset of the "
-            "visible cards."
-        ),
-    )
-    parser.add_argument(
         "--faiss-shard",
         action="store_true",
         help=(
-            "npu multi-card only: shard the base across the --faiss-devices "
-            "cards (capacity for indexes bigger than one card's HBM). Default "
+            "npu multi-card only: shard the base across the visible NPUs "
+            "(capacity for indexes bigger than one card's HBM). Default "
             "is replica mode (full base per card, throughput)."
         ),
     )
@@ -998,7 +983,6 @@ def main(argv=None):
         corpus_path=args.corpus_path,
         retrieval_topk=args.topk,
         faiss_device=args.faiss_device if not args.faiss_gpu else "gpu",
-        faiss_devices=args.faiss_devices,
         faiss_shard=args.faiss_shard,
         index_mmap=not args.no_index_mmap,
         retrieval_model_path=args.retriever_model,
