@@ -544,18 +544,24 @@ class DenseRetriever(BaseRetriever):
                 npu_config.device = devs[0]  # logical card id (ASCEND_RT_VISIBLE_DEVICES mapped)
                 self.index = faiss.NpuIndexFlat(res, cpu_idx, npu_config)  # metric follows the CPU index
             else:
-                # replica mode (shard=False): full base on each card -> higher
-                # throughput; search fans the batch out and merges.
+                # shard=True: split the base across cards -> capacity (for
+                # indexes bigger than one card's HBM). shard=False (replica):
+                # full base on each card -> throughput; search fans out and
+                # merges either way.
                 vres = faiss.NpuResourcesVector()
                 vdev = faiss.Int32Vector()
                 for d in devs:
                     vres.push_back(res)
                     vdev.push_back(d)
                 co = faiss.NpuMultipleClonerOptions()
-                co.shard = False
+                co.shard = config.faiss_shard
                 co.storageType = 0  # Float16
                 self.index = faiss.index_cpu_to_npu_multiple(vres, vdev, cpu_idx, co)
-                logger.info("[load] index replicated across NPUs %s", devs)
+                logger.info(
+                    "[load] index %s across NPUs %s",
+                    "sharded" if config.faiss_shard else "replicated",
+                    devs,
+                )
             logger.info("[load] index moved to NPU (%.1fs)", time.time() - t0)
         else:
             raise ValueError(f"unknown --faiss-device: {config.faiss_device!r}")
@@ -695,6 +701,7 @@ class Config:
         corpus_path: str = "./data/corpus.jsonl",
         faiss_device: str = "cpu",
         faiss_devices: str = "",  # npu only: comma-separated LOGICAL card ids (e.g. "0,1"); empty = device 0
+        faiss_shard: bool = False,  # npu multi-card: True = split base across cards (capacity), False = replica (throughput)
         index_mmap: bool = True,
         retrieval_model_path: str = "./model",
         retrieval_pooling_method: str = "mean",
@@ -715,6 +722,7 @@ class Config:
         self.corpus_path = corpus_path
         self.faiss_device = faiss_device
         self.faiss_devices = faiss_devices
+        self.faiss_shard = faiss_shard
         self.index_mmap = index_mmap
         self.retrieval_model_path = retrieval_model_path
         self.retrieval_pooling_method = retrieval_pooling_method
@@ -923,6 +931,15 @@ def _build_parser():
         ),
     )
     parser.add_argument(
+        "--faiss-shard",
+        action="store_true",
+        help=(
+            "npu multi-card only: shard the base across the --faiss-devices "
+            "cards (capacity for indexes bigger than one card's HBM). Default "
+            "is replica mode (full base per card, throughput)."
+        ),
+    )
+    parser.add_argument(
         "--faiss_gpu",
         action="store_true",
         help=argparse.SUPPRESS,  # deprecated alias of --faiss-device gpu (run_common.sh)
@@ -975,6 +992,7 @@ def main(argv=None):
         retrieval_topk=args.topk,
         faiss_device=args.faiss_device if not args.faiss_gpu else "gpu",
         faiss_devices=args.faiss_devices,
+        faiss_shard=args.faiss_shard,
         index_mmap=not args.no_index_mmap,
         retrieval_model_path=args.retriever_model,
         retrieval_pooling_method=args.pooling,

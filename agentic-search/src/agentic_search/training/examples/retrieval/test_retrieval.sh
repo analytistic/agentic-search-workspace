@@ -33,6 +33,7 @@ TOPK="${TOPK:-3}"
 FAISS_DEVICE="${FAISS_DEVICE:-npu}"
 FAISS_DEVICES="${FAISS_DEVICES:-0,1}"
 NPU_VISIBLE_DEVICES="${NPU_VISIBLE_DEVICES:-6,7}"
+FAISS_SHARD="${FAISS_SHARD:-1}"   # npu multi-card: 1 = shard 64G base across cards, 0 = replica
 
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
@@ -153,14 +154,18 @@ echo "Model:  $MODEL"
 echo "Port:   $PORT"
 echo "Log:    $LOG"
 
+FAISS_ARGS=(--faiss-device "$FAISS_DEVICE" --faiss-devices "$FAISS_DEVICES")
+if [ "$FAISS_SHARD" = "1" ]; then
+    FAISS_ARGS+=(--faiss-shard)
+fi
+
 "$PYTHON" "$SERVER" \
     --index_path "$INDEX" \
     --corpus_path "$CORPUS" \
     --topk "$TOPK" \
     --retriever_name e5 \
     --retriever_model "$MODEL" \
-    --faiss-device "$FAISS_DEVICE" \
-    --faiss-devices "$FAISS_DEVICES" \
+    "${FAISS_ARGS[@]}" \
     > "$LOG" 2>&1 &
 
 SERVER_PID=$!
