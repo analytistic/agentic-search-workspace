@@ -73,8 +73,12 @@ ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3,4,5}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-6}"
 
 # ---- training hyperparams ----
-BATCH_SIZE="${BATCH_SIZE:-256}"
-MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
+# Divisibility constraint (verl config check, utils/config.py):
+# train_batch_size * rollout_n must be divisible by n_gpus when
+# use_dynamic_bsz=False (minimal_bsz = n_gpus = 6). 256*5=1280 % 6 = 2
+# CRASHES at startup; 252*5=1260 % 6 = 0 and 252 % 126 = 0 work.
+BATCH_SIZE="${BATCH_SIZE:-252}"
+MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-126}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
@@ -85,7 +89,7 @@ LR="${LR:-1e-6}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
-VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"
+VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-60}"   # 60*5=300 % 6 = 0 (64*5=320 % 6 = 2 also fails val-side micro-batch chunking)
 VAL_ONLY="${VAL_ONLY:-False}"
 
 # ============================================================
