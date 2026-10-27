@@ -25,14 +25,14 @@ PYTHON="${PYTHON:-$HOME/.local/bin/python}"
 # 检索服务脚本所在目录
 SERVER_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training/examples/retrieval"
 
-# 索引文件（服务器全量：/data/xuwentao_data/wiki-18-e5-index/index）
-INDEX="/data/xuwentao_data/wiki-18-e5-index/index"
+# 索引文件（默认服务器全量：/data/xuwentao_data/wiki-18-e5-index/index）
+INDEX="${INDEX:-/data/xuwentao_data/wiki-18-e5-index/index}"
 
-# 语料文件（服务器全量：/data/xuwentao_data/wiki_2018/wiki-18.jsonl）
-CORPUS="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
+# 语料文件（默认服务器全量：/data/xuwentao_data/wiki_2018/wiki-18.jsonl）
+CORPUS="${CORPUS:-/data/xuwentao_data/wiki_2018/wiki-18.jsonl}"
 
 # e5 编码模型路径
-MODEL="/data/models/e5-base-v2/"
+MODEL="${MODEL:-/data/models/e5-base-v2/}"
 
 # 服务端口
 PORT="8000"
@@ -45,12 +45,9 @@ READY_TIMEOUT="1800"
 # 批量测速：每请求塞多少条 query（空格分隔，逐个测）
 QUERY_SIZES="1 3 5 8"
 
-# 并发测速：同时发多少个请求（每个请求 1 条 query）
-# ⚠️ 已知问题：本机 + 服务器（Linux/torch_npu）上并发独立请求都会死锁
-# （多个线程同时调用 torch 前向）。默认留空 = 不测并发。
-# 正确用法：需要并发/多条时，把 query 塞进【一个请求的 queries 列表】批量发。
-# 想诊断并发时才手动改成 "1 4 8"（会卡住，每个请求 CURL_TIMEOUT 秒后超时）。
-CONCURRENCY_LEVELS=""
+# async 并发测速：同时发多少个请求（每个请求 1 条 query，用 httpx.AsyncClient）
+# 注：服务端 /retrieve 是同步端点（FastAPI 线程池），高并发可能触达 torch 前向的线程安全上限
+CONCURRENCY_LEVELS="${CONCURRENCY_LEVELS:-3 5 10}"
 
 # 每个场景重复几次取平均
 REPEATS="3"
@@ -156,21 +153,37 @@ for size in $QUERY_SIZES; do
 done
 
 echo
-echo "================ 并发测速（N 个请求同时发，每请求 1 条）================"
+echo "================ async 并发测速（N 个并发请求，每请求 1 条 query）================"
 printf "%-14s %-16s %-14s %-16s\n" "并发数" "总耗时(ms)" "每请求(ms)" "吞吐(req/s)"
 for n in $CONCURRENCY_LEVELS; do
-    payload="$(make_payload 1)"
-    start_ns=$(python3 -c 'import time; print(time.time_ns())')
-    for _ in $(seq 1 "$n"); do
-        curl -s --max-time "$CURL_TIMEOUT" -o /dev/null -X POST "http://localhost:$PORT/retrieve" \
-            -H "Content-Type: application/json" -d "$payload" &
-    done
-    wait
-    end_ns=$(python3 -c 'import time; print(time.time_ns())')
-    total_ms=$(( (end_ns - start_ns) / 1000000 ))
-    per_req=$((total_ms / n))
-    rps=$((n * 1000 / total_ms))
-    printf "%-14s %-16s %-14s %-16s\n" "$n" "$total_ms" "$per_req" "$rps"
+    "$PYTHON" - "$n" "$TOPK" "$PORT" "$(make_payload 1)" <<'EOF'
+import asyncio, json, sys, time
+
+level, topk, port = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+payload = json.loads(sys.argv[4])
+url = f"http://localhost:{port}/retrieve"
+
+
+async def main():
+    import httpx
+
+    async with httpx.AsyncClient(timeout=60) as client:
+
+        async def one():
+            r = await client.post(url, json=payload)
+            return r.status_code
+
+        t0 = time.time()
+        statuses = await asyncio.gather(*[one() for _ in range(level)])
+        total_ms = (time.time() - t0) * 1000
+
+    per_req = total_ms / level
+    rps = level / (total_ms / 1000)
+    print(f"{level:<14} {total_ms:<16.0f} {per_req:<14.0f} {rps:<16.2f}  (status={sorted(set(statuses))})")
+
+
+asyncio.run(main())
+EOF
 done
 
 echo
