@@ -42,7 +42,7 @@ data:
   max_start_length: 4096
   dataloader_num_workers: 4
   filter_overlong_prompts_workers: 8   # num_proc for the overlong-prompt filter (RLHFDataset.maybe_filter_out_long_prompts)
-  max_samples_per_source: 500   # val only: at most N samples per data_source (0 = keep all; stratified subsample, cached as <stem>_sub<N>.parquet)
+  max_samples_per_source: 100   # val only: at most N samples per data_source (0 = keep all; stratified subsample, cached as <stem>_sub<N>.parquet)
 
 actor_rollout_ref:
   model:
