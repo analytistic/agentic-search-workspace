@@ -22,6 +22,10 @@ export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searc
 PYTHON="python3"
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 
+# custom chat template: passed via env var (Hydra CLI overrides cannot lex the
+# jinja text); consumed in the config as ${oc.env:SEARCH_R1_JINJA}
+export SEARCH_R1_JINJA="${SEARCH_R1_JINJA:-$(cat "$TRAINING_DIR/quarl/template/search_r1.jinja")}"
+
 # ---- model / data ----
 MODEL_PATH="/data/models/Qwen2.5-7B-Instruct"
 DATA_PATH="/data/xuwentao_data/search_r1/train.parquet"        # parquet without suffix
@@ -187,7 +191,6 @@ if [ "$RANK" -eq 0 ]; then
         data.filter_overlong_prompts=True \
         data.truncation='left' \
         actor_rollout_ref.model.path="$MODEL_PATH" \
-        actor_rollout_ref.model.custom_chat_template="$(cat "$TRAINING_DIR/quarl/template/search_r1.jinja")" \
         actor_rollout_ref.actor.optim.lr="$LR" \
         actor_rollout_ref.actor.use_kl_loss=True \
         actor_rollout_ref.actor.strategy=fsdp \

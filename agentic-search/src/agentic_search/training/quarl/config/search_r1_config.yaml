@@ -48,6 +48,7 @@ actor_rollout_ref:
     enable_gradient_checkpointing: true   # explicit (default is also True)
     override_config:
       attn_implementation: flash_attention_2   # actor/ref transformers FA2 (needs bf16; NPU needs transformers-npu)
+    custom_chat_template: ${oc.env:SEARCH_R1_JINJA,null}   # Search-R1 <search>-protocol template (launcher exports it)
   actor:
     ppo_micro_batch_size_per_gpu: 1   # required when use_dynamic_bsz=False
     fsdp_config:
