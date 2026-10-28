@@ -10,6 +10,8 @@ already teach the <search> tag protocol, which matches our SearchToolParser
 data has no system message; eval data keeps its own).
 """
 
+import numpy as np
+
 from verl.trainer.ppo.ray_trainer import Role, ResourcePoolManager
 
 def _lazy_import(module_name: str, class_name: str):
@@ -118,7 +120,8 @@ def _clean_prompts_for_hermes(prompt):
       messages without that marker pass through unchanged)
 
     Accepts a list[dict], a single message dict (search-r1 train parquet
-    stores one dict), or a JSON-encoded string of either.
+    stores one dict), a numpy object array (val parquet), or a JSON-encoded
+    string of any of those.
     """
     import json
 
@@ -127,6 +130,8 @@ def _clean_prompts_for_hermes(prompt):
             prompt = json.loads(prompt)
         except json.JSONDecodeError:
             return prompt
+    if isinstance(prompt, np.ndarray):
+        prompt = prompt.item() if prompt.size == 1 else prompt.tolist()
     if isinstance(prompt, dict):
         prompt = [prompt]
 
