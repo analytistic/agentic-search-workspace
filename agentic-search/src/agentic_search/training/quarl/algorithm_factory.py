@@ -109,6 +109,63 @@ def _resolve_diff_val_reward_fn_config(config):
     return config.get("quark", {}).get("diff_val_reward_fn_config")
 
 
+def _clean_prompts_for_hermes(prompt):
+    """Strip Search-R1 long instructions for the hermes protocol.
+
+    - drop system messages (qwen_hermes.jinja supplies a unified system
+      prompt that also carries the tool-call / think / answer rules)
+    - trim each user message to the part after "Question: " (kept verbatim;
+      messages without that marker pass through unchanged)
+
+    Accepts a list[dict], a single message dict (search-r1 train parquet
+    stores one dict), or a JSON-encoded string of either.
+    """
+    import json
+
+    if isinstance(prompt, str):
+        try:
+            prompt = json.loads(prompt)
+        except json.JSONDecodeError:
+            return prompt
+    if isinstance(prompt, dict):
+        prompt = [prompt]
+
+    cleaned = []
+    for msg in prompt or []:
+        role, content = msg.get("role"), msg.get("content")
+        if role == "system":
+            continue
+        if role == "user" and isinstance(content, str) and "Question: " in content:
+            content = content.split("Question: ", 1)[1]
+        cleaned.append({"role": role, "content": content})
+    return cleaned
+
+
+def _maybe_clean_prompts(data_paths, config):
+    """Rewrite the input parquet(s) with hermes-cleaned prompts when
+    ``data.clean_question`` is set. Rebuilt on every launch (no cache), so a
+    template/protocol change always sees fresh prompts."""
+    import os
+    import pandas as pd
+
+    if not config.data.get("clean_question", False):
+        return list(data_paths)
+
+    cleaned_paths = []
+    for i, pq in enumerate(data_paths):
+        df = pd.read_parquet(pq)
+        if "prompt" in df.columns:
+            df["prompt"] = df["prompt"].apply(_clean_prompts_for_hermes)
+        out = os.path.join(
+            os.path.dirname(pq),
+            f"{os.path.splitext(os.path.basename(pq))[0]}_clean{i}.parquet",
+        )
+        df.to_parquet(out)
+        print(f"[algorithm_factory] hermes prompt cleaning: {pq} -> {out} ({len(df)} rows)")
+        cleaned_paths.append(out)
+    return cleaned_paths
+
+
 def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
     """Create the RL dataset and apply algorithm-specific chat templates."""
     import os
@@ -138,6 +195,9 @@ def create_rl_dataset(data_paths, config, tokenizer=None, processor=None):
             converted.append(pq_path)
         else:
             converted.append(p)
+
+    # hermes protocol: strip Search-R1 long instructions / system messages
+    converted = _maybe_clean_prompts(converted, config)
 
     # Self-check: the tool file must exist for the rollout workers to load it.
     ftp = config.actor_rollout_ref.rollout.multi_turn.get("function_tool_path", None)
@@ -215,6 +275,9 @@ def create_rl_dataset_val(data_paths, config, tokenizer=None, processor=None):
             converted.append(pq_path)
         else:
             converted.append(p)
+
+    # hermes protocol: strip Search-R1 long instructions / system messages
+    converted = _maybe_clean_prompts(converted, config)
 
     if max_per_source > 0:
         # stratified subsample: at most max_per_source rows per data_source
