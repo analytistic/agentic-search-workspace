@@ -203,7 +203,6 @@ if [ "$RANK" -eq 0 ]; then
         --config-name search_r1_config \
         actor_rollout_ref.model.custom_chat_template='${oc.env:HERMES_JINJA,null}' \
         data.clean_question=true \
-        data.apply_chat_template_kwargs.enable_thinking=true \
         data.train_files="[\"${DATA_PATH}\"]" \
         data.val_files="[\"${TEST_DATA_PATH}\"]" \
         data.train_batch_size="$BATCH_SIZE" \

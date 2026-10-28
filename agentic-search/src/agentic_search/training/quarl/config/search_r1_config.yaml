@@ -43,6 +43,9 @@ data:
   dataloader_num_workers: 4
   filter_overlong_prompts_workers: 8   # num_proc for the overlong-prompt filter (RLHFDataset.maybe_filter_out_long_prompts)
   max_samples_per_source: 100   # val only: at most N samples per data_source (0 = keep all; stratified subsample, cached as <stem>_sub<N>.parquet)
+  clean_question: false   # hermes launchers flip to true: strip Search-R1 long instructions / system messages from prompts (qwen*_hermes.jinja supplies a unified system prompt)
+  apply_chat_template_kwargs:
+    enable_thinking: true   # thinking on (auto <think> start on qwen3.x templates; no-op for the Qwen2.5 search template)
 
 actor_rollout_ref:
   model:
