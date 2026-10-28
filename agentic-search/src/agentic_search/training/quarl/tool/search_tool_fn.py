@@ -199,10 +199,13 @@ def perform_single_search_batch(
 
     if error_msg:
         metadata["status"] = "api_error"
-        # error_msg carries the full exception repr (nested quotes/parens like
-        # NewConnectionError("... ')))"}")); pass the model only the first
-        # line, truncated, so the injected <information> text stays readable.
-        first_line = str(error_msg).splitlines()[0] if error_msg else "unknown error"
+        # error_msg carries the full exception repr (nested quotes/parens,
+        # chained "(Caused by ...)" tail). Strip the repr shell so the model
+        # gets a clean one-liner; the full error stays in logger.error below.
+        text = str(error_msg) if error_msg else "unknown error"
+        if " (Caused by " in text:
+            text = text.split(" (Caused by ")[0]
+        first_line = text.splitlines()[0] if text else "unknown error"
         result_text = json.dumps({"result": f"Search error: {first_line[:200]}"})
         logger.error(f"Batch search: API error occurred: {error_msg}")
     elif api_response:
