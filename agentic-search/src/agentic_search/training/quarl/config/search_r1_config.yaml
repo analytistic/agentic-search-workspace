@@ -54,11 +54,23 @@ actor_rollout_ref:
       attn_implementation: flash_attention_2   # actor/ref transformers FA2 (needs bf16; NPU needs transformers-npu)
     custom_chat_template: ${oc.env:SEARCH_R1_JINJA,null}   # Search-R1 <search>-protocol template (launcher exports it)
   actor:
-    ppo_micro_batch_size_per_gpu: 2   # update_actor hot spot: micro 1 -> 2 halves FSDP steps (1280/4/2=160/卡); no token-cap protection with use_dynamic_bsz=False, so watch OOM before going to 4
+    # Dynamic batch sizing: pack each micro-batch by TOKEN count instead of by
+    # sample count. Fixed-size micro batches chronically under-fill the device
+    # here, because agentic trajectories range from a few hundred to 12k tokens
+    # (10 turns of accumulated tool results) -- a fixed pair of samples can waste
+    # >80% of the compute on the short one. With this on, the
+    # *micro_batch_size_per_gpu* knobs are ignored and the split is driven by
+    # ppo_max_token_len_per_gpu (launcher sets it to
+    # 2 x (max_prompt_length + max_response_length), which is verl's documented
+    # minimum; 3x is what upstream's run_qwen2-7b_rm_seq_balance.sh uses).
+    use_dynamic_bsz: true
+    ppo_micro_batch_size_per_gpu: null   # ignored while use_dynamic_bsz=true
     fsdp_config:
       model_dtype: bfloat16   # flash_attention_2 requires bf16/fp16; verl's fp32 default crashes
   ref:
-    log_prob_micro_batch_size_per_gpu: 1   # ref (KL) model mirrors the actor's micro batch; null -> ActorConfig assert
+    # null + dynamic bsz: bounded by ref.log_prob_max_token_len_per_gpu, which
+    # auto-follows actor.ppo_max_token_len_per_gpu (see ref.yaml oc.select).
+    log_prob_micro_batch_size_per_gpu: null
     fsdp_config:
       model_dtype: bfloat16
   rollout:
@@ -67,7 +79,7 @@ actor_rollout_ref:
     response_length: 8192  # per-sample generation cap, multi-turn total (must match launcher data.max_response_length)
     max_model_len: 12288   # vLLM engine cap = prompt 4096 + response 8192
     max_num_seqs: 256   # per-replica concurrent sequences (long multi-turn prompts; bounded by KV cache via gpu_memory_utilization)
-    log_prob_micro_batch_size_per_gpu: 1   # actor infer-mode (old-policy/ref logprob prefill) micro batch; required when use_dynamic_bsz=False
+    log_prob_micro_batch_size_per_gpu: null   # dynamic bsz: bounded by rollout.log_prob_max_token_len_per_gpu (auto-follows actor)
     trace:
       backend: mlflow   # per-sample trajectory tracing; view with: MLFLOW_TRACKING_URI=sqlite:///tmp/mlruns.db mlflow ui
       token2text: true  # decode tokens to text in traces

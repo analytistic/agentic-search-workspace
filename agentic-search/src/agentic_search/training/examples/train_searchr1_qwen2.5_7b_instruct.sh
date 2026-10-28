@@ -94,8 +94,17 @@ VAL_ONLY="${VAL_ONLY:-False}"
 
 # ============================================================
 
-PPO_MAX_TOKEN_LEN_PER_GPU=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))
+# 2x (prompt + response): verl's tuning guide requires at least 2x under
+# use_dynamic_bsz, i.e. one micro-batch can hold two full-length trajectories.
+PPO_MAX_TOKEN_LEN_PER_GPU=$(((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH) * 2))
+# vLLM keeps its own cap: the actor budget above is for fwd/bwd packing only;
+# feeding 2x to the engine just inflates prefill batches and KV-cache peaks.
+ROLLOUT_MAX_NUM_BATCHED_TOKENS=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))
 export ASCEND_VISIBLE_DEVICES
+# torch_npu resolves its device ids from ASCEND_RT_VISIBLE_DEVICES; without it
+# the pin above is silently ignored by torch_npu (faiss_ascend only reads the
+# other one), so both must be exported.
+export ASCEND_RT_VISIBLE_DEVICES
 
 mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
@@ -212,11 +221,12 @@ if [ "$RANK" -eq 0 ]; then
         actor_rollout_ref.actor.use_kl_loss=True \
         actor_rollout_ref.actor.strategy=fsdp \
         actor_rollout_ref.actor.ppo_mini_batch_size="$MINI_BATCH_SIZE" \
+        actor_rollout_ref.actor.use_dynamic_bsz=True \
         actor_rollout_ref.actor.ppo_max_token_len_per_gpu="$PPO_MAX_TOKEN_LEN_PER_GPU" \
         actor_rollout_ref.actor.clip_ratio_high=0.285 \
         actor_rollout_ref.rollout.name=vllm \
         actor_rollout_ref.rollout.tensor_model_parallel_size="$ROLLOUT_TP" \
-        actor_rollout_ref.rollout.max_num_batched_tokens="$PPO_MAX_TOKEN_LEN_PER_GPU" \
+        actor_rollout_ref.rollout.max_num_batched_tokens="$ROLLOUT_MAX_NUM_BATCHED_TOKENS" \
         actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \
         actor_rollout_ref.rollout.n="$ROLLOUT_N" \
         actor_rollout_ref.rollout.multi_turn.max_assistant_turns="$MAX_TURNS" \

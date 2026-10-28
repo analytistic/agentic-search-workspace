@@ -24,11 +24,10 @@ from verl.tools.function_tool import function_tool
 # ToolAgentLoop picks the parser.
 from quarl.agent_loop.tool_parser import SearchToolParser  # noqa: F401
 
-DEFAULT_TIMEOUT = 2  # Default search request timeout
-MAX_RETRIES = 2  # initial attempt + 1 retry (worst case ~5s, fail fast instead of hanging the trajectory)
+TIMEOUT = 2  # per-request timeout for /retrieve (seconds)
+MAX_RETRIES = 2  # initial attempt + 1 retry (worst case ~5s incl. delay: fail fast instead of hanging the trajectory)
 INITIAL_RETRY_DELAY = 1
 TOPK = 3
-TIMEOUT = 5000
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -49,7 +48,7 @@ def call_search_api(
     query_list: list[str],
     topk: int = 3,
     return_scores: bool = True,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = TIMEOUT,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """Call the remote search API with retry logic and increasing delays.
 
@@ -152,7 +151,7 @@ def perform_single_search_batch(
     retrieval_service_url: str,
     query_list: list[str],
     topk: int = 3,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = TIMEOUT,
 ) -> tuple[str, dict[str, Any]]:
     """Perform a single batch search for multiple queries.
 

@@ -100,6 +100,9 @@ N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
 
 PPO_MAX_TOKEN_LEN_PER_GPU=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))
 export ASCEND_VISIBLE_DEVICES
+# torch_npu reads ASCEND_RT_VISIBLE_DEVICES while faiss_ascend reads the one
+# above; mirror the pin so both stacks see the same cards.
+export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-${ASCEND_VISIBLE_DEVICES}}"
 
 mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR" \
     "$OUTPUT_DIR/rollout" "$OUTPUT_DIR/val"
