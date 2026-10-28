@@ -61,28 +61,24 @@ NODE_IP="${NODE_IP:-127.0.0.1}"
 # retrieval service on this node agree on the URL
 export SEARCH_IP="${SEARCH_IP:-127.0.0.1}"
 
-# ---- retrieval service (CPU mode on Ascend) ----
+# ---- retrieval service (NPU) ----
 RETRIEVER_ENABLE="${RETRIEVER_ENABLE:-1}"
 RETRIEVER_SERVER="$TRAINING_DIR/examples/retrieval/retrieval_server.py"
 RETRIEVER_INDEX_PATH="/data/xuwentao_data/wiki-18-e5-index/index"
 RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
 RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
-# Retriever NPUs: die 4,5 (NPU2), fully separate from the 4 training cards.
-# Pin both visibility vars so faiss_ascend (reads ASCEND_VISIBLE_DEVICES)
-# and torch_npu (prefers ASCEND_RT_VISIBLE_DEVICES) agree.
-RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-4,5}"
+# Pin both visibility vars: faiss_ascend reads ASCEND_VISIBLE_DEVICES, torch_npu prefers ASCEND_RT_VISIBLE_DEVICES.
+RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-10}"   # single NPU for retrieval (die 10)
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
-# ---- Ascend ----
-# 4 training cards (die 0-3 = NPU0/1); retriever gets die 4,5 (NPU2).
-# die 6-13 (NPU3-6) are occupied by other processes, die 14,15 spare.
-ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3}"
-N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-4}"
+# ---- Ascend (10 training cards die 0-9, retriever die 10) ----
+ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9}"   # 10 training cards (die 0-9 = NPU0-4)
+ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9}"   # torch_npu pin, must match ASCEND_VISIBLE_DEVICES
+N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-10}"
 
 # ---- training hyperparams ----
-# 4 training cards (die 0-3 = NPU0/1): 256*5=1280 % 4 = 0 so the verl
-# divisibility assert passes with the original sizes.
+# 10 training cards: 256*5=1280, 128*5=640, 64*5=320 all divisible by 10.
 BATCH_SIZE="${BATCH_SIZE:-256}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
@@ -95,7 +91,7 @@ LR="${LR:-1e-6}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
-VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"   # 64*5=320 % 4 = 0
+VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"   # 64*5=320 % 10 = 0
 VAL_ONLY="${VAL_ONLY:-False}"
 
 # ============================================================
@@ -107,7 +103,7 @@ mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
 # tool URL is resolved from SEARCH_IP/SEARCH_PORT by quarl/tool/search_tool_fn.py
 
-# ---- retrieval service (CPU: no --faiss_gpu) ----
+# ---- retrieval service (NPU: single-card faiss) ----
 start_retriever() {
     # Kill stale retriever instances (SIGKILL; SIGTERM may not die fast enough).
     if command -v lsof >/dev/null 2>&1; then
@@ -123,11 +119,9 @@ start_retriever() {
         sleep 1
     done
     echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to terminal)"
-    # Retriever lives on its own NPUs (die 4,5), fully separate from the
-    # training cards. Pin BOTH visibility vars: faiss_ascend (CANN/AscendC
-    # ops) reads ASCEND_VISIBLE_DEVICES while torch_npu prefers
-    # ASCEND_RT_VISIBLE_DEVICES. Command-prefix env (no export) so the
-    # training launch below keeps its own visibility.
+    # Pin BOTH visibility vars (faiss_ascend reads ASCEND_VISIBLE_DEVICES,
+    # torch_npu prefers ASCEND_RT_VISIBLE_DEVICES). Command-prefix env (no
+    # export) so the training launch below keeps its own visibility.
     ASCEND_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" ASCEND_RT_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" \
         OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
         --index_path "$RETRIEVER_INDEX_PATH" \
@@ -137,7 +131,7 @@ start_retriever() {
         --retriever_model "$RETRIEVER_MODEL_PATH" \
         --cache-entries 10000 \
         --faiss-device npu \
-        --faiss-shard &
+        &   # single-card faiss (no shard)
     return 0
 }
 

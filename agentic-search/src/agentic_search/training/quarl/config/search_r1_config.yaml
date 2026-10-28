@@ -51,7 +51,7 @@ actor_rollout_ref:
       attn_implementation: flash_attention_2   # actor/ref transformers FA2 (needs bf16; NPU needs transformers-npu)
     custom_chat_template: ${oc.env:SEARCH_R1_JINJA,null}   # Search-R1 <search>-protocol template (launcher exports it)
   actor:
-    ppo_micro_batch_size_per_gpu: 1   # required when use_dynamic_bsz=False
+    ppo_micro_batch_size_per_gpu: 2   # update_actor hot spot: micro 1 -> 2 halves FSDP steps (1280/4/2=160/卡); no token-cap protection with use_dynamic_bsz=False, so watch OOM before going to 4
     fsdp_config:
       model_dtype: bfloat16   # flash_attention_2 requires bf16/fp16; verl's fp32 default crashes
   ref:
@@ -63,7 +63,7 @@ actor_rollout_ref:
     prompt_length: 4096    # per-sample prompt cap (must match launcher data.max_prompt_length)
     response_length: 8192  # per-sample generation cap, multi-turn total (must match launcher data.max_response_length)
     max_model_len: 12288   # vLLM engine cap = prompt 4096 + response 8192
-    max_num_seqs: 128   # per-replica concurrent sequences (long multi-turn prompts; bounded by KV cache via gpu_memory_utilization)
+    max_num_seqs: 256   # per-replica concurrent sequences (long multi-turn prompts; bounded by KV cache via gpu_memory_utilization)
     log_prob_micro_batch_size_per_gpu: 1   # actor infer-mode (old-policy/ref logprob prefill) micro batch; required when use_dynamic_bsz=False
     trace:
       backend: mlflow   # per-sample trajectory tracing; view with: MLFLOW_TRACKING_URI=sqlite:///tmp/mlruns.db mlflow ui
