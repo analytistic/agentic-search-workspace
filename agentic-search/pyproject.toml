@@ -7,11 +7,10 @@ name = "agentic-search"
 version = "0.1.0"
 description = "Research implementations and experiments for agentic search."
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+# Matches the current conda base on the training hosts (3.10.16).
+requires-python = ">=3.10,<3.11"
 dependencies = [
-    "pyserini==1.4.0",
     "spacy==3.8.16",
-    "numpy==1.26.4",
     "pyarrow==25.0.0",
     "verl",
 ]
@@ -20,7 +19,8 @@ dependencies = [
 retrieval-cpu = [
     "faiss-cpu>=1.8",
 ]
-retrieval-gpu = ["faiss-gpu>=1.7.4"]
+# Plain `faiss-gpu` ships cu11-era binaries and cannot be installed on CUDA 12.
+retrieval-gpu = ["faiss-gpu-cu12"]
 
 training-npu = [
     "torch==2.10.0",
@@ -29,16 +29,74 @@ training-npu = [
     # 5.x removed them
     "transformers==5.5.4",
     "ray==2.48.0",
+    # verl 0.9.0 requires numpy>=2.0.0, but the NPU host stack is still on 1.26.
+    "numpy==1.26.4",
+    # PyPI ships 1.x as sdist only (no wheels) and the Tsinghua mirror stops at
+    # 0.40.0, so this needs --index-url https://pypi.org/simple. 2.x requires
+    # Python >=3.12, hence staying on 1.x for the 3.10 hosts.
+    "pyserini==1.4.0",
     "einops",   # rearrange for the 5.x npu flash attention fallback path
     # triton-ascend bundles triton for NPU; installing triton separately
     # overwrites files — install triton-ascend only
     # "triton-ascend==3.2.2 ; sys_platform == 'linux'",
+    # faiss is intentionally absent: the NPU host builds faiss-ascend from
+    # source (CANN toolchain), it is not a PyPI package.
 ]
 
 training-cpu = [
     "torch==2.10.0",
     "transformers==5.5.4",
     "ray==2.48.0",
+    "numpy==2.2.6",
+    "faiss-cpu>=1.8",
+]
+
+# GPU (CUDA) training stack. torch 2.9.1 is pinned by BOTH sglang 0.5.10 and
+# verl's [sglang] extra, and the +cu128 wheels are what we verified on A16/A800.
+training-gpu = [
+    # Install through the CUDA index, otherwise PyPI hands you CPU-only wheels:
+    #   --index-url https://download.pytorch.org/whl/cu128
+    "torch==2.9.1",
+    "torchvision==0.24.0",
+    "torchaudio==2.9.1",
+    # verl requires >=5.5.3,!=5.6.0,<5.11 -- do NOT downgrade it for sglang,
+    # see rollout-sglang-gpu below.
+    "transformers==5.5.4",
+    # Satisfies verl's numpy>=2.0.0, unlike the 1.26.4 pinned for NPU.
+    "numpy==2.2.6",
+    "ray[default]>=2.41.0",
+    "tensordict>=0.8.0,<=0.10.0,!=0.9.0",
+    "torchdata",
+    "einops",
+    # Imported at module scope by verl/workers/rollout/llm_server.py; not pulled
+    # in automatically when verl itself is installed editable with --no-deps.
+    "cachetools",
+    # trace.backend=mlflow in the search_r1 configs.
+    "mlflow",
+    # Dense retrieval on GPU. Also requires pyserini for the BM25 service,
+    # which currently lives in the training-npu extra only.
+    "faiss-gpu-cu12",
+]
+
+# sglang rollout backend for GPU. MUST be installed with --no-deps:
+#   uv pip install --no-deps sglang==0.5.10 sglang-kernel==0.4.1 \
+#       flashinfer-python==0.6.7.post2 flashinfer-cubin==0.6.7.post2
+# Reason: sglang 0.5.10 hard-pins transformers==5.3.0, which contradicts the
+# >=5.5.3 that verl needs, so a plain resolver run is impossible. Verified
+# working with transformers 5.5.4. qwen3_5.py only exists from 0.5.10 on
+# (0.5.8 cannot serve Qwen3.5 at all).
+rollout-sglang-gpu = [
+    "sglang==0.5.10",
+    "sglang-kernel==0.4.1",
+    "flashinfer-python==0.6.7.post2",
+    "flashinfer-cubin==0.6.7.post2",
+]
+
+# Optional GPU kernel speedups. flash-attn is deliberately absent: verl's fsdp
+# engine passes no attn_implementation at all, so transformers falls back to
+# sdpa (Qwen3_5 declares _supports_sdpa=True).
+accel-gpu = [
+    "liger-kernel",
 ]
 
 
