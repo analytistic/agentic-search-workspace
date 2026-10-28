@@ -32,6 +32,7 @@ class SearchToolParser(ToolParser):
         self.tool_call_end_token: str = "</search>"
         self.eos_token: str = tokenizer.eos_token
         self.tool_call_regex = regex.compile(r"<search>(.*?)</search>", regex.DOTALL)
+        self.answer_regex = regex.compile(r"<answer>(.*?)</answer>", regex.DOTALL)
 
     @rollout_trace_op
     async def extract_tool_calls(
@@ -43,6 +44,13 @@ class SearchToolParser(ToolParser):
         for token in (self.tokenizer.pad_token, self.eos_token):
             if token:
                 text = text.replace(token, "")
+
+        # </answer> closes the trajectory: if the model already wrote a
+        # complete answer block in this turn, swallow any <search> calls and
+        # return an empty tool_calls list, so the agent loop terminates
+        # instead of running another retrieval round.
+        if self.answer_regex.search(text):
+            return self.tool_call_regex.sub("", text), []
 
         matches = self.tool_call_regex.findall(text)
         function_calls = []
