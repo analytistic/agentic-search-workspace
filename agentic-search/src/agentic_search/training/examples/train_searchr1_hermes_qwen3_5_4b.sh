@@ -12,10 +12,6 @@
 
 set -euo pipefail
 
-# Local retrieval/judge calls must not go through the environment's proxy
-# (proxy can't reach 127.0.0.1 and hangs the request).
-export NO_PROXY="localhost,127.0.0.1"
-export no_proxy="$NO_PROXY"
 
 # ========================== CONFIG ==========================
 
@@ -78,7 +74,7 @@ RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-10}"   # single NPU for retrieva
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
 # ---- Ascend (10 training cards die 0-9, retriever die 10) ----
-ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9}"   # 10 training cards (die 0-9 = NPU0-4)
+ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"   # 10 training cards (die 0-9 = NPU0-4)
 ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9}"   # torch_npu pin, must match ASCEND_VISIBLE_DEVICES
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-10}"
 
