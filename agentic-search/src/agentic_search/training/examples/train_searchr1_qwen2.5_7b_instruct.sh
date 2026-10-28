@@ -10,6 +10,11 @@
 
 set -euo pipefail
 
+# Local retrieval/judge calls must not go through the environment's proxy
+# (proxy can't reach 127.0.0.1 and hangs the request).
+export NO_PROXY="localhost,127.0.0.1"
+export no_proxy="$NO_PROXY"
+
 # ========================== CONFIG ==========================
 
 # ---- paths ----
