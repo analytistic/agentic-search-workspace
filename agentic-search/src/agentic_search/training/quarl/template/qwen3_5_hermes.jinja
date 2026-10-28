@@ -68,8 +68,18 @@
         {%- endif %}
     {%- endif %}
 {%- endfor %}
+{# verl injects a tool-only message list (add_messages) and renders it in
+   isolation; there is no user message in that list, so the stock Qwen3.5
+   "no user query" guard would raise. Only enforce it when the list contains
+   a non-tool message (a genuinely user-less conversation). #}
 {%- if ns.multi_step_tool %}
-    {{- raise_exception('No user query found in messages.') }}
+    {%- set ns_nontool = namespace(flag=false) %}
+    {%- for message in messages %}
+        {%- if message.role != "tool" %}{%- set ns_nontool.flag = true %}{%- endif %}
+    {%- endfor %}
+    {%- if ns_nontool.flag %}
+        {{- raise_exception('No user query found in messages.') }}
+    {%- endif %}
 {%- endif %}
 {%- for message in messages %}
     {%- set content = render_content(message.content, true)|trim %}
@@ -122,7 +132,11 @@
         {%- endif %}
         {{- '<|im_end|>\n' }}
     {%- elif message.role == "tool" %}
-        {%- if loop.previtem and loop.previtem.role != "tool" %}
+        {# Single-message injection (verl renders the tool result in isolation):
+           loop.previtem is None there, so emit the user marker unconditionally
+           unless the previous message is already a tool message (multi-tool
+           results share one user block). #}
+        {%- if not loop.previtem or loop.previtem.role != "tool" %}
             {{- '<|im_start|>user' }}
         {%- endif %}
         {{- '\n<tool_response>\n' }}
