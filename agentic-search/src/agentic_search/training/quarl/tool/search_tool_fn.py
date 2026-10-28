@@ -24,8 +24,8 @@ from verl.tools.function_tool import function_tool
 # ToolAgentLoop picks the parser.
 from quarl.agent_loop.tool_parser import SearchToolParser  # noqa: F401
 
-DEFAULT_TIMEOUT = 30  # Default search request timeout
-MAX_RETRIES = 10
+DEFAULT_TIMEOUT = 2  # Default search request timeout
+MAX_RETRIES = 2  # initial attempt + 1 retry (worst case ~5s, fail fast instead of hanging the trajectory)
 INITIAL_RETRY_DELAY = 1
 TOPK = 3
 TIMEOUT = 5000

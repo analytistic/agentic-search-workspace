@@ -84,7 +84,7 @@ MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
-ROLLOUT_TP="${ROLLOUT_TP:-2}"
+ROLLOUT_TP="${ROLLOUT_TP:-1}"   # 7B fits one 64GB NPU; TP=1 avoids cross-card TP comm
 MAX_TURNS="${MAX_TURNS:-10}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
 LR="${LR:-1e-6}"
@@ -118,7 +118,7 @@ start_retriever() {
         fi
         sleep 1
     done
-    echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to terminal)"
+    echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to $OUTPUT_DIR/logs/retriever_rank0.log)"
     # Pin BOTH visibility vars (faiss_ascend reads ASCEND_VISIBLE_DEVICES,
     # torch_npu prefers ASCEND_RT_VISIBLE_DEVICES). Command-prefix env (no
     # export) so the training launch below keeps its own visibility.
@@ -131,7 +131,7 @@ start_retriever() {
         --retriever_model "$RETRIEVER_MODEL_PATH" \
         --cache-entries 10000 \
         --faiss-device npu \
-        &   # single-card faiss (no shard)
+        > "$OUTPUT_DIR/logs/retriever_rank0.log" 2>&1 &
     return 0
 }
 
@@ -224,6 +224,7 @@ if [ "$RANK" -eq 0 ]; then
         actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \
         actor_rollout_ref.rollout.n="$ROLLOUT_N" \
         actor_rollout_ref.rollout.multi_turn.max_assistant_turns="$MAX_TURNS" \
+        actor_rollout_ref.rollout.agent.num_workers=10 \
         actor_rollout_ref.rollout.multi_turn.format=qwen3_coder \
         actor_rollout_ref.hybrid_engine=True \
         diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_eval_score.py" \
