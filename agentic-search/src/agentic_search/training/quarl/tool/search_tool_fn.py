@@ -34,11 +34,14 @@ logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
+# Retrieval service is co-located with the trainer (single-node launcher);
+# hard-code the loopback URL so a stray SEARCH_IP env override (the server
+# shell exports one) cannot reroute requests to an unreachable host.
+RETRIEVAL_URL = "http://127.0.0.1:8000/retrieve"
+
+
 def _retrieval_url() -> str:
-    """Build the retrieval service URL from the exported launcher vars."""
-    host = os.getenv("SEARCH_IP", "127.0.0.1")
-    port = os.getenv("SEARCH_PORT", "8000")
-    return f"http://{host}:{port}/retrieve"
+    return RETRIEVAL_URL
 
 
 def call_search_api(
@@ -76,7 +79,16 @@ def call_search_api(
             logger.info(
                 f"{log_prefix}Attempt {attempt + 1}/{MAX_RETRIES}: Calling search API at {retrieval_service_url}"
             )
-            response = requests.post(retrieval_service_url, headers=headers, json=payload, timeout=timeout)
+            response = requests.post(
+                retrieval_service_url,
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+                # The retrieval service is local (SEARCH_IP:SEARCH_PORT); never
+                # route it through the environment's proxy, which cannot reach
+                # 127.0.0.1 and hangs the request.
+                proxies={"http": None, "https": None},
+            )
 
             if response.status_code in [500, 502, 503, 504]:
                 last_error = (
@@ -187,7 +199,11 @@ def perform_single_search_batch(
 
     if error_msg:
         metadata["status"] = "api_error"
-        result_text = json.dumps({"result": f"Search error: {error_msg}"})
+        # error_msg carries the full exception repr (nested quotes/parens like
+        # NewConnectionError("... ')))"}")); pass the model only the first
+        # line, truncated, so the injected <information> text stays readable.
+        first_line = str(error_msg).splitlines()[0] if error_msg else "unknown error"
+        result_text = json.dumps({"result": f"Search error: {first_line[:200]}"})
         logger.error(f"Batch search: API error occurred: {error_msg}")
     elif api_response:
         logger.debug(f"Batch search: API Response: {api_response}")
