@@ -73,13 +73,13 @@ RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
 RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-10}"   # single NPU for retrieval (die 10)
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
-# ---- Ascend (10 training cards die 0-9, retriever die 10) ----
+# ---- Ascend (8 training cards die 0-7, retriever die 10) ----
 ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"   # 10 training cards (die 0-9 = NPU0-4)
-ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9}"   # torch_npu pin, must match ASCEND_VISIBLE_DEVICES
-N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-10}"
+ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"   # torch_npu pin, must match ASCEND_VISIBLE_DEVICES
+N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
 
 # ---- training hyperparams ----
-# 10 training cards: 256*5=1280, 128*5=640, 64*5=320 all divisible by 10.
+# 8 training cards: 256*5=1280, 128*5=640, 64*5=320 all divisible by 8.
 BATCH_SIZE="${BATCH_SIZE:-256}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
