@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Search-R1 training launcher, hermes protocol variant (JSON <tool_call> tool calls).
 # Same pipeline as train_searchr1_qwen2.5_7b_instruct.sh, but uses
-# search_r1_hermes_config.yaml: format=hermes (Qwen-native <tool_call>{json}<//tool_call>), qwen3_5_hermes.jinja (unified system prompt with think/answer rules), and data.clean_question=True (strips the Search-R1 long instructions from prompts).
+# search_r1_config.yaml (hermes overrides injected by this launcher): format=hermes (Qwen-native <tool_call>{json}<//tool_call>), qwen3_5_hermes.jinja (unified system prompt with think/answer rules), and data.clean_question=True (strips the Search-R1 long instructions from prompts).
 #
 # 1) optional: start retrieval service (CPU mode)
 # 2) start Ray cluster
@@ -206,7 +206,10 @@ export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 # ---- launch training ----
 if [ "$RANK" -eq 0 ]; then
     "$PYTHON" -m quarl.main_rl \
-        --config-name search_r1_hermes_config \
+        --config-name search_r1_config \
+        actor_rollout_ref.model.custom_chat_template='${oc.env:HERMES_JINJA,null}' \
+        data.clean_question=true \
+        data.apply_chat_template_kwargs.enable_thinking=true \
         data.train_files="[\"${DATA_PATH}\"]" \
         data.val_files="[\"${TEST_DATA_PATH}\"]" \
         data.train_batch_size="$BATCH_SIZE" \
