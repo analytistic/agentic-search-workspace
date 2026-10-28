@@ -52,7 +52,7 @@ else
 fi
 
 # ---- output ----
-OUTPUT_ROOT="${OUTPUT_ROOT:-./output}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/tmp}"
 OUTPUT_SUBDIR="${OUTPUT_SUBDIR:-ssp_Qwen2.5-7B-Instruct}"
 OUTPUT_DIR="${OUTPUT_ROOT}/${OUTPUT_SUBDIR}/$(date +"%-m_%-d_%-H")"
 SAVE_CHECKPOINT_DIR="${OUTPUT_DIR}/ckpt"
