@@ -38,7 +38,7 @@ READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-60}"
 
 QUERY_SIZES="${QUERY_SIZES:-1 3 5 8}"
-CONCURRENCY_LEVELS="${CONCURRENCY_LEVELS:-10 30 60}"
+CONCURRENCY_LEVELS="${CONCURRENCY_LEVELS:-10 30 60 100}"
 
 REPEATS="${REPEATS:-3}"
 WARMUP="${WARMUP:-1}"
@@ -418,6 +418,14 @@ async def main():
 
 asyncio.run(main())
 PY
+
+    # Crash check: faiss NPU's LIFO temp-memory assert (StandardNpuResources.cpp:529)
+    # kills the whole process under concurrent search; verify the service survives.
+    if curl --noproxy '*' -sS -m 3 -o /dev/null -w '%{http_code}' "$BASE_URL/status" 2>/dev/null | grep -q 200; then
+        echo "  [alive] service OK after concurrency $level"
+    else
+        echo "  [CRASHED] service NOT responding after concurrency $level (faiss NPU LIFO assert?)"
+    fi
 
 done
 

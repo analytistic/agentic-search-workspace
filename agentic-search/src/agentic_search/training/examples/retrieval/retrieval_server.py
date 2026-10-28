@@ -586,12 +586,18 @@ class DenseRetriever(BaseRetriever):
         self.topk = config.retrieval_topk
         self.batch_size = config.retrieval_batch_size
         self.ntotal = self.index.ntotal if hasattr(self.index, "ntotal") else None
+        # faiss NPU's StandardNpuResources requires temp memory to be freed in
+        # LIFO order; concurrent index.search calls interleave alloc/free and
+        # trip the NpuMemoryReservation destructor assert, crashing the whole
+        # process. Serialize search with a lock (same pattern as the encoder).
+        self._search_lock = threading.Lock()
 
     def _search(self, query: str, num: int = None, return_score: bool = False):
         if num is None:
             num = self.topk
         query_emb = self.encoder.encode(query)
-        scores, idxs = self.index.search(query_emb, k=num)
+        with self._search_lock:
+            scores, idxs = self.index.search(query_emb, k=num)
         idxs, scores = self._drop_padding(idxs[0], scores[0])
         if len(idxs) == 0:
             self._bump(stat_empty=1)
@@ -619,7 +625,8 @@ class DenseRetriever(BaseRetriever):
         for start_idx in range(0, len(query_list), self.batch_size):
             query_batch = query_list[start_idx : start_idx + self.batch_size]
             batch_emb = self.encoder.encode(query_batch)
-            batch_scores, batch_idxs = self.index.search(batch_emb, k=num)
+            with self._search_lock:
+                batch_scores, batch_idxs = self.index.search(batch_emb, k=num)
             batch_scores = batch_scores.tolist()
             batch_idxs = batch_idxs.tolist()
 
@@ -793,7 +800,7 @@ def _trim_docs(docs: List[dict]) -> List[dict]:
 
 
 @app.post("/retrieve")
-def retrieve_endpoint(request: QueryRequest):
+async def retrieve_endpoint(request: QueryRequest):
     """Batch retrieval.
 
     Request:  {"queries": [...], "topk": 3, "return_scores": true}
