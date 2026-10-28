@@ -4,8 +4,9 @@
      eval data) -- no Qwen default, no # Tools section, no JSON <tool_call>
      guide. The search protocol is taught entirely by the data prompts
      (<search>query</search> / <information> / <answer>).
-   - tool messages render without the stock <tool_response> wrapper, so the
-     model sees the plain <information>...</information> observation.
+   - tool messages render without the stock <tool_response> wrapper: the
+     template wraps them in <information>...</information> (the search
+     protocol the data prompts teach), so the search tool returns plain text.
    Role markers and the message loop are unchanged from the official template. #}
 {{- '<|im_start|>system\n' }}
 {%- if messages[0]['role'] == 'system' %}
@@ -37,8 +38,7 @@
         {%- if (loop.index0 == 0) or (messages[loop.index0 - 1].role != "tool") %}
             {{- '<|im_start|>user' }}
         {%- endif %}
-        {{- '\n' }}
-        {{- message.content }}
+        {{- '\n<information>\n' + message.content + '\n</information>' }}
         {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}
             {{- '<|im_end|>\n' }}
         {%- endif %}

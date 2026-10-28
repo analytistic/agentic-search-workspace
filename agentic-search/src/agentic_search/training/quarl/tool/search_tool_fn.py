@@ -229,21 +229,25 @@ def perform_single_search_batch(
 
 
 @function_tool
-def search(query: str) -> str:
-    """Searches the web for relevant information based on the given query.
+def search(query_list: list[str]) -> str:
+    """Searches the web for relevant information based on the given queries.
 
     Args:
-        query: A single fully-formed semantic query. The tool will return search results for this query.
+        query_list: A list of fully-formed semantic queries. The tool will return search results for each query.
     """
+    # Parser may degrade an array parameter to a plain string when the model
+    # skips the list syntax (e.g. literal_eval fails); normalize to a list.
+    if isinstance(query_list, str):
+        query_list = [query_list]
+
     result_text, metadata = perform_single_search_batch(
         retrieval_service_url=_retrieval_url(),
-        query_list=[query],
+        query_list=query_list,
         topk=TOPK,
         timeout=TIMEOUT,
     )
-    # Align with the Search-R1/SSP observation format: the data prompts teach
-    # "results arrive between <information> and </information>", so wrap the
-    # plain-text doc list (metadata["formatted_result"] already strips the
-    # {"result": ...} JSON shell) in those tags for the model to see.
+    # Protocol tags are the template's job: search_r1.jinja wraps tool
+    # messages in <information>...</information>, qwen*_hermes.jinja in
+    # <tool_response>...</tool_response>. Return the plain text result.
     formatted = metadata.get("formatted_result") or result_text
-    return f"<information>\n{formatted}\n</information>"
+    return formatted

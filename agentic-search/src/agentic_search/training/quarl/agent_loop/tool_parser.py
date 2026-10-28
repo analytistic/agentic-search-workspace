@@ -58,7 +58,7 @@ class SearchToolParser(ToolParser):
             function_calls.append(
                 FunctionCall(
                     name="search",
-                    arguments=json.dumps({"query": match.strip()}, ensure_ascii=False),
+                    arguments=json.dumps({"query_list": [match.strip()]}, ensure_ascii=False),
                 )
             )
 
