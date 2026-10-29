@@ -73,11 +73,10 @@ actor_rollout_ref:
     fsdp_config:
       model_dtype: bfloat16   # flash_attention_2 requires bf16/fp16; verl's fp32 default crashes
   ref:
-    # Fixed micro batch while dynamic bsz is off. This stage is forward-only
-    # (no activations kept), so it tolerates a larger batch than the actor's
-    # train micro batch -- verl's tuning guide suggests ~2x. Still it does
-    # materialise full logits (vocab 152064), so watch memory here first.
-    log_prob_micro_batch_size_per_gpu: 2
+    # Fixed micro batch while dynamic bsz is off. Forward-only (no activations
+    # kept). Dropped to 1 (from 2) on 2026-10-29: this stage barely costs time
+    # and a smaller batch lowers the full-logits memory peak (vocab 152064).
+    log_prob_micro_batch_size_per_gpu: 1
     fsdp_config:
       model_dtype: bfloat16
   rollout:
@@ -86,7 +85,7 @@ actor_rollout_ref:
     response_length: 8192  # per-sample generation cap, multi-turn total (must match launcher data.max_response_length)
     max_model_len: 12288   # vLLM engine cap = prompt 4096 + response 8192
     max_num_seqs: 256   # per-replica concurrent sequences (long multi-turn prompts; bounded by KV cache via gpu_memory_utilization)
-    log_prob_micro_batch_size_per_gpu: 2   # forward-only; mirrors ref (2x the actor train micro batch)
+    log_prob_micro_batch_size_per_gpu: 1   # forward-only; dropped to 1 (from 2) 2026-10-29, low time cost
     trace:
       backend: mlflow   # per-sample trajectory tracing; view with: MLFLOW_TRACKING_URI=sqlite:///tmp/mlruns.db mlflow ui
       token2text: true  # decode tokens to text in traces

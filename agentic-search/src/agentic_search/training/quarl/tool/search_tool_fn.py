@@ -24,8 +24,8 @@ from verl.tools.function_tool import function_tool
 # ToolAgentLoop picks the parser.
 from quarl.agent_loop.tool_parser import SearchToolParser  # noqa: F401
 
-TIMEOUT = 2  # per-request timeout for /retrieve (seconds)
-MAX_RETRIES = 2  # initial attempt + 1 retry (worst case ~5s incl. delay: fail fast instead of hanging the trajectory)
+TIMEOUT = 3  # per-request timeout for /retrieve (seconds)
+MAX_RETRIES = 2  # initial attempt + 1 retry (worst case ~7s incl. delay: fail fast instead of hanging the trajectory)
 INITIAL_RETRY_DELAY = 1
 TOPK = 3
 
