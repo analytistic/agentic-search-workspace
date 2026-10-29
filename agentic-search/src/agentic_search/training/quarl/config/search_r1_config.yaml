@@ -72,6 +72,7 @@ actor_rollout_ref:
     ppo_micro_batch_size_per_gpu: 4   # per-GPU SAMPLES; only read when use_dynamic_bsz=false
     fsdp_config:
       model_dtype: bfloat16   # flash_attention_2 requires bf16/fp16; verl's fp32 default crashes
+      fsdp_size: 2   # FSDP2: 8 NPUs -> 4 groups of 2 (4-way DP); lowers intra-group all-gather/reduce-scatter comm
   ref:
     # Fixed micro batch while dynamic bsz is off. Forward-only (no activations
     # kept). Dropped to 1 (from 2) on 2026-10-29: this stage barely costs time
@@ -79,6 +80,7 @@ actor_rollout_ref:
     log_prob_micro_batch_size_per_gpu: 1
     fsdp_config:
       model_dtype: bfloat16
+      fsdp_size: 2   # mirror actor: 4 FSDP groups of 2 across the 8 NPUs
   rollout:
     name: vllm
     prompt_length: 4096    # per-sample prompt cap (must match launcher data.max_prompt_length)
