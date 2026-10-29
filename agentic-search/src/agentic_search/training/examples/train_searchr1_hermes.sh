@@ -69,16 +69,16 @@ RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
 RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
 # Pin both visibility vars: faiss_ascend reads ASCEND_VISIBLE_DEVICES, torch_npu prefers ASCEND_RT_VISIBLE_DEVICES.
-RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-10}"   # single NPU for retrieval (die 10)
+RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-1}"   # single NPU for retrieval (die 1)
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
-# ---- Ascend (10 training cards die 0-9, retriever die 10) ----
-ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9}"   # 10 training cards (die 0-9 = NPU0-4)
-ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9}"   # torch_npu pin, must match ASCEND_VISIBLE_DEVICES
-N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-10}"
+# ---- Ascend (8 training cards die 8-15, retriever die 1) ----
+ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-8,9,10,11,12,13,14,15}"   # 8 training cards (die 8-15)
+ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-8,9,10,11,12,13,14,15}"   # torch_npu pin, must match ASCEND_VISIBLE_DEVICES
+N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
 
 # ---- training hyperparams ----
-# 10 training cards: 256*5=1280, 128*5=640, 64*5=320 all divisible by 10.
+# 8 training cards: 256*5=1280, 128*5=640, 64*5=320 all divisible by 8.
 BATCH_SIZE="${BATCH_SIZE:-256}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
@@ -96,8 +96,12 @@ VAL_ONLY="${VAL_ONLY:-False}"
 
 # ============================================================
 
-# 2x (prompt + response): verl's tuning guide requires at least 2x under
-# use_dynamic_bsz, i.e. one micro-batch can hold two full-length trajectories.
+# NOTE: use_dynamic_bsz is OFF for now (see search_r1_config.yaml), so the
+# actor's token budget below is NOT read by the trainer. It is kept because
+# re-enabling dynamic bsz should start from 2x, and the variable documents the
+# value to use then. Fixed micro batches live in the yaml:
+#   actor.ppo_micro_batch_size_per_gpu=4
+#   rollout/ref.log_prob_micro_batch_size_per_gpu=2
 PPO_MAX_TOKEN_LEN_PER_GPU=$(((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH) * 2))
 # vLLM keeps its own cap: the actor budget above is for fwd/bwd packing only;
 # feeding 2x to the engine just inflates prefill batches and KV-cache peaks.
@@ -226,7 +230,7 @@ if [ "$RANK" -eq 0 ]; then
         actor_rollout_ref.actor.use_kl_loss=True \
         actor_rollout_ref.actor.strategy=fsdp \
         actor_rollout_ref.actor.ppo_mini_batch_size="$MINI_BATCH_SIZE" \
-        actor_rollout_ref.actor.use_dynamic_bsz=True \
+        actor_rollout_ref.actor.use_dynamic_bsz=False \
         actor_rollout_ref.actor.ppo_max_token_len_per_gpu="$PPO_MAX_TOKEN_LEN_PER_GPU" \
         actor_rollout_ref.actor.clip_ratio_high=0.285 \
         actor_rollout_ref.rollout.name=vllm \

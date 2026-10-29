@@ -99,6 +99,10 @@ N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
 # ============================================================
 
 PPO_MAX_TOKEN_LEN_PER_GPU=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))
+# Previously this file only *exported* ASCEND_VISIBLE_DEVICES without ever setting
+# it, so the variable was empty and both stacks saw every card. Pin it like the
+# search_r1 launchers do (8 training cards die 8-15; the retriever here is CPU-only).
+ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-8,9,10,11,12,13,14,15}"
 export ASCEND_VISIBLE_DEVICES
 # torch_npu reads ASCEND_RT_VISIBLE_DEVICES while faiss_ascend reads the one
 # above; mirror the pin so both stacks see the same cards.
