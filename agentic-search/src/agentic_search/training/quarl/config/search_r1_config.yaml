@@ -72,7 +72,17 @@ actor_rollout_ref:
     ppo_micro_batch_size_per_gpu: 4   # per-GPU SAMPLES; only read when use_dynamic_bsz=false
     fsdp_config:
       model_dtype: bfloat16   # flash_attention_2 requires bf16/fp16; verl's fp32 default crashes
-      fsdp_size: 2   # FSDP2: 8 NPUs -> 4 groups of 2 (4-way DP); lowers intra-group all-gather/reduce-scatter comm
+      # fsdp_size = size of ONE FSDP shard group, not the number of groups.
+      # -1 (default) -> 1D mesh (8,), FULL_SHARD/ZeRO-3: all 8 NPUs form a single
+      # FSDP group. 0 < fsdp_size < 8 -> 2D mesh (8//fsdp_size, fsdp_size) and
+      # HYBRID_SHARD (HSDP): the SECOND dim is the FSDP group, the first is DDP.
+      # Kept at -1 on purpose: in verl 0.9.0 the dispatch layer still splits data
+      # by world_size (FSDPEngine.get_data_parallel_rank() returns the global
+      # rank, get_data_parallel_group() returns WORLD), so with HSDP the "ddp"
+      # mesh dim never matches the real data-parallel dim and ranks inside one
+      # FSDP group would get different samples. The "ddp" dim is only consumed
+      # by create_device_mesh and the model merger, never by the train path.
+      fsdp_size: -1
   ref:
     # Fixed micro batch while dynamic bsz is off. Forward-only (no activations
     # kept). Dropped to 1 (from 2) on 2026-10-29: this stage barely costs time
@@ -80,7 +90,7 @@ actor_rollout_ref:
     log_prob_micro_batch_size_per_gpu: 1
     fsdp_config:
       model_dtype: bfloat16
-      fsdp_size: 2   # mirror actor: 4 FSDP groups of 2 across the 8 NPUs
+      fsdp_size: -1   # mirror actor: one FSDP group over all 8 NPUs (see actor.fsdp_config)
   rollout:
     name: vllm
     prompt_length: 4096    # per-sample prompt cap (must match launcher data.max_prompt_length)
