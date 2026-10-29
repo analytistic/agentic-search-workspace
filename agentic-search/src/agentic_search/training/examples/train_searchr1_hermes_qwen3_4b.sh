@@ -86,6 +86,19 @@ SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
 VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"   # 64*5=320 is divisible by 8
 VAL_ONLY="${VAL_ONLY:-False}"
+# Pre-training validation is OFF by default: it costs a full validation
+# rollout pass over VAL_BATCH_SIZE before step 1, which is pure overhead when
+# the model is still untrained. Set VAL_BEFORE_TRAIN=True to get the baseline
+# metrics at step 0.
+VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
+# verl only evaluates `val_only` INSIDE the `val_before_train` branch
+# (verl/trainer/ppo/v1/trainer_base.py:421), so VAL_ONLY=True together with
+# VAL_BEFORE_TRAIN=False would silently start training instead of exiting
+# after the validation pass. Force it on in that case.
+if [ "$VAL_ONLY" = "True" ] && [ "$VAL_BEFORE_TRAIN" != "True" ]; then
+    echo "[WARN] VAL_ONLY=True requires val_before_train=True; enabling val_before_train."
+    VAL_BEFORE_TRAIN=True
+fi
 
 # ============================================================
 
@@ -238,7 +251,7 @@ if [ "$RANK" -eq 0 ]; then
         trainer.project_name=searchr1_hermes \
         trainer.experiment_name="searchr1_hermes_qwen3_4b_$(date +%m_%d_%H)" \
         trainer.logger='["console","mlflow"]' \
-        trainer.val_before_train=True \
+        trainer.val_before_train="$VAL_BEFORE_TRAIN" \
         trainer.val_only="$VAL_ONLY" \
         trainer.n_gpus_per_node="$N_GPUS_PER_NODE" \
         trainer.nnodes="$NNODES" \
