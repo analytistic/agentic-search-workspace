@@ -90,8 +90,17 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export WORKER_DEBUG="${WORKER_DEBUG:-0}"
 export EVAL_DEBUG_PORT="${EVAL_DEBUG_PORT:-5679}"
 export EVAL_DEBUG_WAIT="${EVAL_DEBUG_WAIT:-0}"
-if [[ "$WORKER_DEBUG" == "1" ]]; then
-    export EVAL_DEBUG_WORKER=1
+
+# EVAL_TRACE_GEN=1 不给断点，只把每轮 generate 的 prompt_ids / token_ids 打出来，
+# 写到 EVAL_TRACE_FILE（默认 /root/eval_trace.log）。
+export EVAL_TRACE_GEN="${EVAL_TRACE_GEN:-0}"
+export EVAL_TRACE_FILE="${EVAL_TRACE_FILE:-/root/eval_trace.log}"
+export EVAL_TRACE_MAX_CHARS="${EVAL_TRACE_MAX_CHARS:-400}"
+
+if [[ "$WORKER_DEBUG" == "1" || "$EVAL_TRACE_GEN" == "1" ]]; then
+    if [[ "$WORKER_DEBUG" == "1" ]]; then
+        export EVAL_DEBUG_WORKER=1
+    fi
     export PYTHONPATH="$EVAL_DIR/debug_hooks:$PYTHONPATH"
 fi
 
@@ -107,6 +116,7 @@ echo "   IDE attach  : WORKER_DEBUG=$WORKER_DEBUG  port=$EVAL_DEBUG_PORT  wait=$
 if [[ "$WORKER_DEBUG" == "1" ]]; then
     echo "                 -> VSCode 'Python: Remote Attach' -> localhost:$EVAL_DEBUG_PORT"
 fi
+echo "   gen trace   : EVAL_TRACE_GEN=$EVAL_TRACE_GEN  file=$EVAL_TRACE_FILE"
 echo "   breakpoint  : training/verl/verl/experimental/agent_loop/tool_agent_loop.py:235"
 echo "=========================================================="
 echo
