@@ -76,9 +76,21 @@ export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"
 export REWARD_NUM_WORKERS="${REWARD_NUM_WORKERS:-4}"
 
 cd "$EVAL_DIR"
-# --config-name 选择三种模式的配置；"$@" 原样透传，用于临时覆盖任意字段
+
+# CLI 参数规范化：`n=` 同时影响 rollout.n 与 val_kwargs.n 两处，
+# 而这两处是各自从 env 插值的（跨 subtree 不能用 ${n}），
+# 所以把 `n=X` 折成 ROLLOUT_N=X，其余参数原样透传。
+PASSTHRU=()
+for _a in "$@"; do
+    case "$_a" in
+        n=*) ROLLOUT_N="${_a#n=}"; export ROLLOUT_N ;;
+        *)   PASSTHRU+=("$_a") ;;
+    esac
+done
+
+# --config-name 选择三种模式的配置；剩余参数原样透传（后者覆盖前者）
 # 例：bash run_rollout_eval.sh n=1 max_samples=64 \
 #       reward.custom_reward_function.reward_kwargs.use_judge=false
 python3 rollout_eval.py \
     --config-name "rollout_eval_${MODE}" \
-    "$@"
+    ${PASSTHRU[@]+"${PASSTHRU[@]}"}
