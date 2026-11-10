@@ -284,14 +284,14 @@ def main(config):
         result = unpad_dataproto(result, pad_size=pad_size)
 
         # 4. decode + union back (same as RayPPOTrainer._validate L660-666)
-        output_texts = [tokenizer.decode(ids, skip_special_tokens=True) for ids in result.batch["responses"]]
+        output_texts = [tokenizer.decode(ids, skip_special_tokens=False) for ids in result.batch["responses"]]
         sample_outputs.extend(output_texts)
         test_batch = test_batch.union(result)
         test_batch.meta_info["validate"] = True
 
         # Store original inputs (same as training: decode the rendered prompt tensor)
         input_ids = test_batch.batch["prompts"]
-        input_texts = [tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+        input_texts = [tokenizer.decode(ids, skip_special_tokens=False) for ids in input_ids]
         sample_inputs.extend(input_texts)
         sample_uids.extend(test_batch.non_tensor_batch["uid"])
 
