@@ -7,9 +7,8 @@
 #
 # 用法：
 #   bash run_eval_debug.sh
-#   RAY_DEBUG=1 bash run_eval_debug.sh              # Ray worker 里可用 breakpoint()
-#   DEBUGPY=1 bash run_eval_debug.sh                # driver 侧 debugpy，监听 :5678
 #   MAX_SAMPLES=4 VAL_BATCH_SIZE=4 bash run_eval_debug.sh
+#   DEBUGPY=1 bash run_eval_debug.sh                # 只调 driver 侧，监听 :5678
 #
 # 断点位置（相对 $REPO_ROOT/agentic-search/src/agentic_search/training）：
 #   verl/experimental/agent_loop/tool_agent_loop.py:235    <- loop 里真正的 generate
@@ -19,8 +18,25 @@
 #   verl/workers/rollout/sglang_rollout/async_sglang_server.py:526  <- server.generate
 #
 # 注意：上面这些都在 **AgentLoopWorker（Ray actor）** 进程里，不是 driver。
-#   - 想在终端里 pdb：必须 RAY_DEBUG=1（Ray 会把 worker 的 stdio 接到终端）
-#   - 想用 IDE 远程调试：DEBUGPY=1 只能 attach 到 driver，断不到 worker
+#
+# ⚠️ Ray 2.48 下 actor 里**直接写 breakpoint() 不生效**（实测：worker 里
+#    sys.breakpointhook 仍是原生实现；ray/util/debugpy.py 的
+#    _override_breakpoint_hooks() 只在第一次显式调 ray_debugpy.set_trace()
+#    时才会执行）。而且 _connect_ray_pdb(patch_stdstreams=False) 是写死的，
+#    所以也没有"断点直接落回本终端"这条路。
+#
+# 可用姿势（worker 内断点需另开一个终端 attach）：
+#   1) 把断点写成显式调用：
+#         import ray
+#         ray.util.rpdb.set_trace()          # 老的 remote pdb（socket 模式）
+#         # 或 ray.util.ray_debugpy.set_trace()  # 新 debugpy 后端
+#   2) 本终端留在这里，**另开一个 ssh 会话**跑：
+#         ray debug
+#      它会列出所有挂住的断点（文件:行号 + actor id），选一个 attach 即可。
+#   3) 只想调 driver 侧（rollout_eval.py 自身逻辑，不是 loop）：DEBUGPY=1。
+#
+# 如果只是想看 loop 里喂进去/吐出来的东西，改一行 print 往往比断点快得多
+# （见文件末尾 EASY_TRACE 说明）。
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
@@ -62,10 +78,21 @@ export TEMPERATURE="${TEMPERATURE:-0.0}"
 export LOG_VAL_GENERATIONS=0
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
-# ---- Ray worker 调试开关 ---------------------------------------------------
-if [[ "${RAY_DEBUG:-0}" == "1" ]]; then
-    export RAY_DEBUG=1
-    export RAY_DEBUG_POST_MORTEM="${RAY_DEBUG_POST_MORTEM:-1}"
+# ---- IDE（VSCode / PyCharm）attach 到 Ray actor ----------------------------
+# ToolAgentLoop 跑在 AgentLoopWorker 这个 Ray actor 子进程里，IDE 没法直接 F5。
+# WORKER_DEBUG=1 会通过 debug_hooks/sitecustomize.py 让那个 actor 主动开
+# debugpy 端口，之后 IDE 用 "Remote Attach" 连上即可，断点/变量都正常。
+#
+#   WORKER_DEBUG=1 EVAL_DEBUG_WAIT=1 bash run_eval_debug.sh
+#
+# 本地先做端口转发（VSCode Remote-SSH 一般会自动转，没有就手动）：
+#   ssh -N -L 5679:127.0.0.1:5679 -p 37585 root@ssh-cn-huabei1.ebcloud.com
+export WORKER_DEBUG="${WORKER_DEBUG:-0}"
+export EVAL_DEBUG_PORT="${EVAL_DEBUG_PORT:-5679}"
+export EVAL_DEBUG_WAIT="${EVAL_DEBUG_WAIT:-0}"
+if [[ "$WORKER_DEBUG" == "1" ]]; then
+    export EVAL_DEBUG_WORKER=1
+    export PYTHONPATH="$EVAL_DIR/debug_hooks:$PYTHONPATH"
 fi
 
 echo "=========================================================="
@@ -76,8 +103,11 @@ echo "   data        : $DATA_PATH"
 echo "   out         : $OUTPUT_DIR"
 echo "   backend     : $ROLLOUT_BACKEND  tp=$ROLLOUT_TP  workers=$NUM_WORKERS  gpus=$N_GPUS_PER_NODE"
 echo "   samples     : MAX_SAMPLES=$MAX_SAMPLES  val_batch=$VAL_BATCH_SIZE  n=$ROLLOUT_N"
-echo "   RAY_DEBUG   : ${RAY_DEBUG:-0}    DEBUGPY: ${DEBUGPY:-0}"
-echo "   breakpoints : training/verl/verl/experimental/agent_loop/tool_agent_loop.py:235"
+echo "   IDE attach  : WORKER_DEBUG=$WORKER_DEBUG  port=$EVAL_DEBUG_PORT  wait=$EVAL_DEBUG_WAIT"
+if [[ "$WORKER_DEBUG" == "1" ]]; then
+    echo "                 -> VSCode 'Python: Remote Attach' -> localhost:$EVAL_DEBUG_PORT"
+fi
+echo "   breakpoint  : training/verl/verl/experimental/agent_loop/tool_agent_loop.py:235"
 echo "=========================================================="
 echo
 
