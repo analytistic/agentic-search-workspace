@@ -1,8 +1,11 @@
+import logging
 import os
 import random
 import re
 import string
 import time
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_answer(s):
@@ -362,6 +365,30 @@ def is_valid_sequence_qwen3_5(text):
     )
 
 
+_ASSISTANT_PREFIX = "<|im_start|>assistant"
+
+
+def ensure_assistant_prefix(text: str) -> str:
+    """Put the assistant marker back in front of a response-only slice.
+
+    The reward path decodes the `responses` tensor, and a response starts at
+    the first *generated* token -- i.e. immediately after
+    ``<|im_start|>assistant\\n``. That marker belongs to the prompt for turn 1
+    and to the rendered observation for later turns, so it is absent from the
+    string the format checks receive. Both checks are driven by it
+    (``is_valid_sequence_search_r1`` looks for it explicitly, and
+    ``_check_hermes_sequence`` cannot leave its initial ``start`` state without
+    it), so without this every well-formed trajectory is reported as broken.
+
+    Idempotent: if the text already opens with the marker (e.g. a full
+    conversation was passed in) it is returned unchanged.
+    """
+    body = text.lstrip()
+    if body.startswith(_ASSISTANT_PREFIX):
+        return body
+    return f"{_ASSISTANT_PREFIX}\n{body}"
+
+
 def qa_format_compute_score(
     solution_str,
     structure_format_score=0.2,
@@ -389,9 +416,10 @@ def qa_format_compute_score(
         structure, else final_format_score.
     """
     check = format_check or is_valid_sequence_search_r1
-    is_valid_format, _ = check(solution_str)
+    is_valid_format, reason = check(ensure_assistant_prefix(solution_str))
     if is_valid_format:
         return structure_format_score
+    logger.debug("[format] broken: %s", reason)
     return final_format_score
 
 

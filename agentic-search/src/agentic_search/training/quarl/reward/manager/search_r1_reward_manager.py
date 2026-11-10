@@ -38,8 +38,16 @@ class SearchR1RewardManager(RewardManagerBase):
         if num_turns is not None:
             extra_info["num_turns"] = num_turns
 
+        # Keep special tokens: the hermes / search_r1 format checks are state
+        # machines driven by <|im_start|>assistant and <|im_end|>, and those
+        # markers are the *only* unambiguous turn boundary. Decoding with
+        # skip_special_tokens=True turns "<|im_start|>user" into the bare word
+        # "user" (which also occurs inside ordinary text) and drops <|im_end|>
+        # entirely, so the machines could never advance past their first tag
+        # and every trajectory scored the broken-format fallback (0.1) instead
+        # of the well-formed 0.2 -- a constant, hence zero gradient.
         response_str = await self.loop.run_in_executor(
-            None, lambda: self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
+            None, lambda: self.tokenizer.decode(valid_response_ids, skip_special_tokens=False)
         )
 
         validate = bool(data_item.non_tensor_batch.get("validate", False))
