@@ -77,8 +77,12 @@ def init_agent_loop_manager(config):
     """
     role_worker_mapping = {Role.ActorRollout: ray.remote(ActorRolloutRefWorker)}
     global_pool_id = "global_pool"
+    # env interpolation / Hydra CLI overrides deliver strings ("1"); the
+    # resource pool spec requires ints
+    n_gpus_per_node = int(config.trainer.n_gpus_per_node)
+    nnodes = int(config.trainer.nnodes)
     resource_pool_spec = {
-        global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
+        global_pool_id: [n_gpus_per_node] * nnodes,
     }
     mapping = {Role.ActorRollout: global_pool_id}
     resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
@@ -274,7 +278,7 @@ def main(config):
             "global_steps": 0,
         }
         gen_batch_padded, pad_size = pad_dataproto_to_divisor(
-            gen_batch, config.actor_rollout_ref.rollout.agent.num_workers
+            gen_batch, int(config.actor_rollout_ref.rollout.agent.num_workers)
         )
         result = manager.generate_sequences(prompts=gen_batch_padded)
         result = unpad_dataproto(result, pad_size=pad_size)
