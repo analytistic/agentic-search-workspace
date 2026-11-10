@@ -17,4 +17,12 @@ actor_rollout_ref:
       default_agent_loop: tool_agent
     multi_turn:
       max_assistant_turns: 10
+      # verl defaults this to 256 *characters*, truncated in the middle, so a
+      # topk=3 search came back as ~128 chars of head + "...(truncated)..." +
+      # ~128 chars of tail. With the passage gutted that way the gold answer is
+      # usually outside the window, which reads as "retrieval never found it".
+      # Training (quarl/config/search_r1_config.yaml) sets 8192 = the whole
+      # generation window, i.e. no eager truncation; match it here or eval and
+      # training see different observations.
+      max_tool_response_length: ${oc.decode:${oc.env:TOOL_RESPONSE_LENGTH,8192}}
       function_tool_path: ${oc.env:WORKSPACE}/quarl/tool/search_tool_fn.py

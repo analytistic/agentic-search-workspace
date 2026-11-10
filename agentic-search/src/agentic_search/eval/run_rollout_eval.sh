@@ -74,6 +74,9 @@ export LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-20}" # 样例表格进 mlflow
 export VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"
 export MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 export MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
+# per-tool-call character budget for the observation (verl's default is 256,
+# which guts every retrieved passage; training uses 8192)
+export TOOL_RESPONSE_LENGTH="${TOOL_RESPONSE_LENGTH:-8192}"
 export TEMPERATURE="${TEMPERATURE:-0.0}"                # 0.0 = greedy
 export USE_JUDGE="${USE_JUDGE:-true}"                   # false = EM 未命中直接 0
 
