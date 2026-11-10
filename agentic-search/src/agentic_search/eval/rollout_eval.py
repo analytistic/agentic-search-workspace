@@ -61,7 +61,7 @@ from verl.trainer.ppo.utils import create_rl_dataset  # noqa: E402
 from verl.utils import hf_processor, hf_tokenizer  # noqa: E402
 from verl.utils.dataset.rl_dataset import collate_fn  # noqa: E402
 from verl.utils.tracking import Tracking, ValidationGenerationsLogger  # noqa: E402
-from verl.workers.fsdp_workers import AsyncActorRolloutRefWorker  # noqa: E402
+from verl.workers.engine_workers import ActorRolloutRefWorker  # noqa: E402
 
 from quarl.algorithm_factory import _clean_prompts_for_hermes  # noqa: E402
 
@@ -75,7 +75,7 @@ def init_agent_loop_manager(config):
     loaded or sharded -- each worker just holds one vLLM engine; the agent loop
     (tool_agent / single_turn_agent) runs inside the worker.
     """
-    role_worker_mapping = {Role.ActorRollout: ray.remote(AsyncActorRolloutRefWorker)}
+    role_worker_mapping = {Role.ActorRollout: ray.remote(ActorRolloutRefWorker)}
     global_pool_id = "global_pool"
     resource_pool_spec = {
         global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
