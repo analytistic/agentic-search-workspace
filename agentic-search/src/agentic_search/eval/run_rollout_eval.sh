@@ -36,27 +36,25 @@ export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
 export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////data/mlruns.db}"
 TRACE_BACKEND="${TRACE_BACKEND:-mlflow}"    # mlflow | trackio | null（null = 只留 jsonl）
 
-# ---- eval 参数（可覆盖）----
+# ---- eval 参数 ----
+# 非数值（路径/模式/后端）可经 env 覆盖；数值参数写死 CLI（不读 env，
+# 避免 ${oc.env:...} 字符串坑 —— Hydra CLI 文本会被类型推断）
 MODE="${MODE:-agentic}"                       # agentic | single | no_tool
 MODEL_PATH="${MODEL_PATH:-/data/models/Qwen3-4B}"
 DATA_PATH="${DATA_PATH:-/data/xuwentao_data/ssp/test.jsonl}"
 OUTPUT_DIR="${OUTPUT_DIR:-/tmp/rollout_eval}"
-N="${N:-5}"                                   # 每题采样数（n=5 与训练一致）
-MAX_SAMPLES="${MAX_SAMPLES:--1}"              # 先小批验证：MAX_SAMPLES=50
-LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-20}"  # 验证样例表格进 mlflow artifact 的数量（0=不记）
-TEMPERATURE="${TEMPERATURE:-0.0}"             # greedy
-N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-1}"
 
 cd "$EVAL_DIR"
 # --config-name 选择三种模式的配置（rollout_eval_agentic / _single / _no_tool）
+# 数值参数改时直接改下面几行（或 yaml）
 python3 rollout_eval.py \
     --config-name "rollout_eval_${MODE}" \
     model_path="$MODEL_PATH" \
     data.val_files="[\"${DATA_PATH}\"]" \
     output_dir="$OUTPUT_DIR" \
-    n="$N" \
-    max_samples="$MAX_SAMPLES" \
-    log_val_generations="$LOG_VAL_GENERATIONS" \
-    actor_rollout_ref.rollout.val_kwargs.temperature="$TEMPERATURE" \
-    trainer.n_gpus_per_node="$N_GPUS_PER_NODE" \
+    n=5 \
+    max_samples=-1 \
+    log_val_generations=20 \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.0 \
+    trainer.n_gpus_per_node=1 \
     actor_rollout_ref.rollout.trace.backend="$TRACE_BACKEND"
