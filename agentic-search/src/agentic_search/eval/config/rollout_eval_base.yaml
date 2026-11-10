@@ -20,7 +20,7 @@ defaults:
   - _self_
 
 # ---- eval 参数（可经 env 或 CLI 覆盖）----
-model_path: ${oc.env:MODEL_PATH,/data/models/Qwen3-4B}
+model_path: ${oc.env:MODEL_PATH,/root/data/models/Qwen3-1.7B}
 output_dir: ${oc.env:OUTPUT_DIR,outputs/rollout_eval}
 n: ${oc.decode:${oc.env:ROLLOUT_N,5}}                  # 每题采样数
 max_samples: ${oc.decode:${oc.env:MAX_SAMPLES,-1}}     # 只跑前 N 题（-1 = 全部）
@@ -28,7 +28,7 @@ log_val_generations: ${oc.decode:${oc.env:LOG_VAL_GENERATIONS,20}}  # 样例表�
 
 # ---- data：复用 verl val 数据流（create_rl_dataset + StatefulDataLoader）----
 data:
-  val_files: ["${oc.env:DATA_PATH,/data/xuwentao_data/ssp/test.jsonl}"]
+  val_files: ["${oc.env:DATA_PATH,/root/data/ssp/test.jsonl}"]
   val_batch_size: ${oc.decode:${oc.env:VAL_BATCH_SIZE,64}}
   max_prompt_length: ${oc.decode:${oc.env:MAX_PROMPT_LENGTH,4096}}
   # 每个 bench(data_source) 最多取 N 题：0 = 不限（保持全量）。
@@ -63,7 +63,7 @@ reward:
 actor_rollout_ref:
   model:
     # 自带 env 插值（不写 ${model_path}）：worker 只拿到本子树，跨根插值会 KeyError
-    path: ${oc.env:MODEL_PATH,/data/models/Qwen3-4B}
+    path: ${oc.env:MODEL_PATH,/root/data/models/Qwen3-1.7B}
     custom_chat_template: ${oc.env:HERMES_JINJA,null}   # hermes 模板（launcher export）
   rollout:
     name: ${oc.env:ROLLOUT_BACKEND,vllm}   # vllm | sglang（机器上装了哪个用哪个）

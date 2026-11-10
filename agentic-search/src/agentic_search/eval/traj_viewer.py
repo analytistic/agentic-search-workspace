@@ -2,9 +2,9 @@
 """Trajectory viewer for rollout_eval output.
 
 Usage:
-    python3 traj_viewer.py                         # serves /data/eval on :8080
+    python3 traj_viewer.py                         # serves /root/data/eval on :8080
     python3 traj_viewer.py --root /some/path
-    python3 traj_viewer.py --root /data/eval --port 9000 --host 0.0.0.0
+    python3 traj_viewer.py --root /root/data/eval --port 9000 --host 0.0.0.0
 
 Each sub-directory under --root is one eval run; it is expected to contain a
 ``*_trajectories.jsonl`` (the name rollout_eval.py writes). The page lists the
@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-ROOT = Path("/data/eval")
+ROOT = Path("/root/data/eval")
 BENCHES = [
     "searchR1_nq",
     "searchR1_triviaqa",
@@ -420,8 +420,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     global ROOT
     ap = argparse.ArgumentParser(description="Browse rollout_eval trajectory jsonl files")
-    ap.add_argument("--root", default=os.environ.get("TRAJ_ROOT", "/data/eval"),
-                    help="directory containing one sub-dir per eval run (default /data/eval)")
+    ap.add_argument("--root", default=os.environ.get("TRAJ_ROOT", "/root/data/eval"),
+                    help="directory containing one sub-dir per eval run (default /root/data/eval)")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8080)
     args = ap.parse_args()

@@ -52,7 +52,7 @@ export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
 
 # ---- trace（verl 原生：worker 内 rollout_trace_op 装饰器逐样本异步记录）----
 # 与训练共用 MLFLOW_TRACKING_URI（同一 sqlite），但独立 experiment（rollout_eval）
-export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////data/mlruns.db}"
+export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////root/data/mlruns.db}"
 export TRACE_BACKEND="${TRACE_BACKEND:-mlflow}"   # mlflow | trackio | null（null = 只留 jsonl）
 
 # ============================================================
@@ -62,12 +62,12 @@ export TRACE_BACKEND="${TRACE_BACKEND:-mlflow}"   # mlflow | trackio | null（nu
 # ============================================================
 # ---- 路径 / 模式 / 后端 ----
 export MODE="${MODE:-agentic}"                          # agentic | single | no_tool
-export MODEL_PATH="${MODEL_PATH:-/data/models/Qwen3-4B}"
-export DATA_PATH="${DATA_PATH:-/data/xuwentao_data/ssp/test.jsonl}"
+export MODEL_PATH="${MODEL_PATH:-/root/data/models/Qwen3-1.7B}"
+export DATA_PATH="${DATA_PATH:-/root/data/ssp/test.jsonl}"
 # 每次 eval 产出一个独立子文件夹（traj_viewer.py 会把它们列成 run 列表），
-# 默认落在 /data/eval 下。想复用固定目录就显式传 OUTPUT_DIR=...
+# 默认落在 /root/data/eval（持久共享盘）下。想复用固定目录就显式传 OUTPUT_DIR=...
 export RUN_NAME="${RUN_NAME:-$(date +%Y%m%d_%H%M%S)}"
-export OUTPUT_DIR="${OUTPUT_DIR:-/data/eval/${RUN_NAME}}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/root/data/eval/${RUN_NAME}}"
 export ROLLOUT_BACKEND="${ROLLOUT_BACKEND:-vllm}"       # vllm | sglang
 export FORMAT_CHECK="${FORMAT_CHECK:-qwen3}"            # qwen3 | qwen3_5 | search_r1
 

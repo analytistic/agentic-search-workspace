@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------------------
 # Start the trajectory viewer.
 #
-#   bash run_traj_viewer.sh                       # /data/eval, port 8080
+#   bash run_traj_viewer.sh                       # /root/data/eval, port 8080
 #   bash run_traj_viewer.sh /some/other/dir      # CLI 传路径
 #   TRAJ_PORT=9000 bash run_traj_viewer.sh
 #
@@ -15,7 +15,7 @@ EVAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_BIN_DIR="${PYTHON_BIN_DIR:-/root/miniconda3/bin}"
 export PATH="$PYTHON_BIN_DIR:$PATH"
 
-ROOT="${1:-${TRAJ_ROOT:-/data/eval}}"
+ROOT="${1:-${TRAJ_ROOT:-/root/data/eval}}"
 PORT="${TRAJ_PORT:-8080}"
 HOST="${TRAJ_HOST:-0.0.0.0}"
 
