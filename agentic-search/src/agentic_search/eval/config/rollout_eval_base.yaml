@@ -31,6 +31,11 @@ data:
   val_files: ["${oc.env:DATA_PATH,/data/xuwentao_data/ssp/test.jsonl}"]
   val_batch_size: ${oc.decode:${oc.env:VAL_BATCH_SIZE,64}}
   max_prompt_length: ${oc.decode:${oc.env:MAX_PROMPT_LENGTH,4096}}
+  # 每个 bench(data_source) 最多取 N 题：0 = 不限（保持全量）。
+  # 与训练侧 data.max_samples_per_source 同名同义：固定 seed 随机抽样，
+  # 每次 eval 抽到同一批题；先按 max_samples 全局截断，再分层抽样。
+  max_samples_per_source: ${oc.decode:${oc.env:MAX_SAMPLES_PER_SOURCE,0}}
+  seed: ${oc.decode:${oc.env:DATA_SEED,1}}
   filter_overlong_prompts: false   # 评测 1:1 全量，不滤超长 prompt
   dataloader_num_workers: 0
 

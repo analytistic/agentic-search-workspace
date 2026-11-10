@@ -58,6 +58,7 @@ export TRACE_BACKEND="${TRACE_BACKEND:-mlflow}"   # mlflow | trackio | null（nu
 # ============================================================
 # eval 参数：全部 export 给 yaml（yaml 用 oc.decode 保证类型）
 # 需要临时改：在命令行追加 hydra 覆盖即可，例如 n=1 max_samples=64
+#             data.max_samples_per_source=50（每个 bench 各 50 题）
 # ============================================================
 # ---- 路径 / 模式 / 后端 ----
 export MODE="${MODE:-agentic}"                          # agentic | single | no_tool
@@ -73,6 +74,8 @@ export FORMAT_CHECK="${FORMAT_CHECK:-qwen3}"            # qwen3 | qwen3_5 | sear
 # ---- 数值（由 yaml 的 oc.decode 还原成 int/float/bool）----
 export ROLLOUT_N="${ROLLOUT_N:-5}"                      # 每题采样数
 export MAX_SAMPLES="${MAX_SAMPLES:--1}"                 # 只跑前 N 题（-1 = 全部）
+export MAX_SAMPLES_PER_SOURCE="${MAX_SAMPLES_PER_SOURCE:-0}"  # 每个 bench 最多 N 题（0 = 不限；同训练侧字段）
+export DATA_SEED="${DATA_SEED:-1}"                      # 分层抽样种子（固定 => 每次抽到同一批题）
 export LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-20}" # 样例表格进 mlflow 的数量（0 = 不记）
 export VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"
 export MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"

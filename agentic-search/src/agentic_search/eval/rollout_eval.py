@@ -29,6 +29,7 @@ metrics go to mlflow (val-core / val-aux, one experiment per mode).
 
 import json
 import os
+import random
 import sys
 import uuid
 from collections import defaultdict
@@ -172,6 +173,58 @@ def _val_metrics_update(data_sources, sample_uids, reward_extra_infos_dict, samp
     return metric_dict
 
 
+# test.jsonl 固定版式：7 个 bench 每 500 行一段（最后一段 125 行）。
+# 只在数据缺 data_source 列时用作兜底分组。
+_BENCH_BLOCK = 500
+
+
+def _limit_per_source(dataset, config):
+    """At most ``data.max_samples_per_source`` questions per bench.
+
+    Same semantics as training's ``create_rl_dataset_val``: group by
+    ``data_source`` and draw a fixed-seed random subsample, so repeated eval
+    runs see the identical question set. Difference: we edit
+    ``RLHFDataset.dataframe`` in memory instead of writing a
+    ``<stem>_sub<N>.parquet`` cache next to the dataset (eval must not scribble
+    on the shared data disk, and the in-memory hermes prompt cleanup happens
+    later per batch). 0 / absent = keep all, i.e. existing runs unchanged.
+
+    Called after ``create_rl_dataset`` (which already applied global
+    ``max_samples``), so the two limits compose: global first, stratified next.
+    """
+    max_per_source = int(config.data.get("max_samples_per_source", 0) or 0)
+    if max_per_source <= 0:
+        return dataset
+    if not hasattr(dataset, "dataframe"):
+        raise RuntimeError("max_samples_per_source requires an RLHFDataset with a .dataframe")
+
+    dataframe = dataset.dataframe
+    if "data_source" in dataframe.column_names:
+        sources = dataframe["data_source"]
+    else:
+        sources = [f"block_{i // _BENCH_BLOCK}" for i in range(len(dataframe))]
+        print("[eval] data_source column missing; grouping by 500-row blocks")
+
+    groups = defaultdict(list)
+    for i, src in enumerate(sources):
+        groups[str(src)].append(i)
+
+    seed = int(config.data.get("seed", 1) or 1)
+    rng = random.Random(seed)
+    keep = []
+    for src, idxs in sorted(groups.items()):
+        picked = rng.sample(idxs, min(max_per_source, len(idxs)))
+        keep.extend(picked)
+        print(f"[eval] per-source {src}: {len(idxs)} -> {len(picked)}")
+    keep.sort()
+    dataset.dataframe = dataframe.select(keep)
+    print(
+        f"[eval] max_samples_per_source={max_per_source} seed={seed}: "
+        f"{len(dataframe)} -> {len(dataset.dataframe)} rows"
+    )
+    return dataset
+
+
 @hydra.main(config_path="config", config_name="rollout_eval_agentic", version_base=None)
 def main(config):
     # hermes template: launcher exports HERMES_JINJA (same as training); fall
@@ -201,6 +254,7 @@ def main(config):
         is_train=False,
         max_samples=int(config.max_samples),
     )
+    dataset = _limit_per_source(dataset, config)
     if len(dataset) == 0:
         print("[eval] empty dataset; nothing to do", file=sys.stderr)
         sys.exit(1)
