@@ -33,6 +33,7 @@ reward:
     name: compute_score
     reward_kwargs:
       format_check: ${oc.env:FORMAT_CHECK,qwen3}   # hermes 协议（qwen3_hermes.jinja）；qwen3_5 / search_r1 可选
+      use_judge: ${oc.env:USE_JUDGE,true}          # false = EM 未命中直接 0，不调 LLM judge
   reward_manager:
     source: importlib
     name: SearchR1RewardManager

@@ -36,6 +36,7 @@ def compute_score(
     extra_info=None,
     validate=False,
     format_check="search_r1",
+    use_judge=True,
 ):
     """Search-R1 layered score: format compliance + answer correctness.
 
@@ -47,6 +48,8 @@ def compute_score(
         validate: validation-mode flag (kept for the manager contract)
         format_check: protocol name for the structure check, from config
             (custom_reward_function.reward_kwargs.format_check)
+        use_judge: when False, EM misses score 0 without calling the LLM
+            judge (custom_reward_function.reward_kwargs.use_judge)
 
     Returns:
         dict with "score" (format + answer) plus components for
@@ -57,7 +60,7 @@ def compute_score(
     # 1. format score: structure compliance only
     fmt = qa_format_compute_score(solution_str, format_check=check)
 
-    # 2. answer score: EM first, LLM judge for the misses
+    # 2. answer score: EM first, optional LLM judge for the misses
     if data_source in MATH_DATA_SOURCES:
         answer = extract_math_solution(solution_str=solution_str)
     else:
@@ -69,6 +72,8 @@ def compute_score(
     elif em_check(answer, ground_truth["target"]):
         em = 1.0
         ans = 1.0
+    elif not use_judge:
+        ans = 0.0
     else:
         question = (extra_info or {}).get("question")
         ans = qa_judge_compute_score(
