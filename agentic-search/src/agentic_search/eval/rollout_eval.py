@@ -51,6 +51,7 @@ import numpy as np  # noqa: E402
 import ray  # noqa: E402
 from omegaconf import OmegaConf  # noqa: E402
 from torchdata.stateful_dataloader import StatefulDataLoader  # noqa: E402
+from tqdm import tqdm  # noqa: E402
 
 from verl.protocol import DataProto, pad_dataproto_to_divisor, unpad_dataproto  # noqa: E402
 from verl.single_controller.ray import RayClassWithInitArgs, RayWorkerGroup  # noqa: E402
@@ -302,7 +303,15 @@ def main(config):
     sample_uids, sample_turns, data_source_lst = [], [], []
     reward_extra_infos_dict = defaultdict(list)
 
-    for batch_dict in dataloader:
+    # tqdm 按 batch(=step) 计进度；tqdm.write 打印每步摘要，不会打断进度条。
+    progress = tqdm(
+        dataloader,
+        total=len(dataloader),
+        desc=f"eval/{mode}",
+        unit="step",
+        dynamic_ncols=True,
+    )
+    for batch_dict in progress:
         # 1. wrap: same as RayPPOTrainer._validate (DataProto.from_single_dict)
         test_batch = DataProto.from_single_dict(batch_dict)
         test_batch.non_tensor_batch["uid"] = np.array(
@@ -408,7 +417,8 @@ def main(config):
             sample_turns.append(np.asarray(test_batch.non_tensor_batch["__num_turns__"]))
         data_source_lst.append(np.asarray(data_sources))
 
-        print(f"[eval] batch done: {len(batch_rows)} samples")
+        progress.set_postfix(samples=total_samples)
+        tqdm.write(f"[eval] batch done: {len(batch_rows)} samples")
 
     # ---- Summary ----
     if total_samples == 0:
