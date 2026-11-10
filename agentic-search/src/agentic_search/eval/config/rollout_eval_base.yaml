@@ -2,38 +2,50 @@
 #   rollout_eval_agentic.yaml / rollout_eval_single.yaml / rollout_eval_no_tool.yaml
 # 模式差异字段写在各自配置里；这里只放公共部分。
 # 注意：hydra.searchpath 只允许写在主配置（三个模式 yaml）里。
+#
+# ---- 类型规则（踩过坑，务必遵守）----
+# `${oc.env:X,default}` 永远返回 **字符串**（默认值也会被转成 str），数值/布尔字段
+# 直接这么写会让下游 `int + str` / `if not "false"` 之类静默出错。
+# 所以凡是数值/布尔，一律套 `${oc.decode:...}`，它会按 YAML 规则还原类型：
+#   ${oc.decode:${oc.env:N,1}}    -> int 1
+#   ${oc.decode:${oc.env:F,0.7}}  -> float 0.7
+#   ${oc.decode:${oc.env:B,false}}-> bool False
+# 同时还保留了 env 覆盖能力（N=64 时仍得到 int 64）。
+# 普通插值（引用另一个数值节点，如 `n: ${rollout_n}`）类型会继承，是安全的；
+# 但 **跨 subtree 的插值不安全**（worker 只拿到 actor_rollout_ref 子树，
+# 解析不到根级 key），所以下游要用的字段一律写成自带 env 的字面插值。
 
 defaults:
   - ppo_trainer
   - _self_
 
-# ---- eval 参数（sh 里可覆盖）----
+# ---- eval 参数（可经 env 或 CLI 覆盖）----
 model_path: ${oc.env:MODEL_PATH,/data/models/Qwen3-4B}
 output_dir: ${oc.env:OUTPUT_DIR,outputs/rollout_eval}
-n: ${oc.env:ROLLOUT_N,5}              # 每题采样数
-max_samples: ${oc.env:MAX_SAMPLES,-1} # 只跑前 N 题（-1 = 全部）
-log_val_generations: ${oc.env:LOG_VAL_GENERATIONS,20}  # 验证样例表格记入 mlflow artifact 的数量（0 = 不记）
+n: ${oc.decode:${oc.env:ROLLOUT_N,5}}                  # 每题采样数
+max_samples: ${oc.decode:${oc.env:MAX_SAMPLES,-1}}     # 只跑前 N 题（-1 = 全部）
+log_val_generations: ${oc.decode:${oc.env:LOG_VAL_GENERATIONS,20}}  # 样例表格进 mlflow 的数量（0 = 不记）
 
 # ---- data：复用 verl val 数据流（create_rl_dataset + StatefulDataLoader）----
 data:
   val_files: ["${oc.env:DATA_PATH,/data/xuwentao_data/ssp/test.jsonl}"]
-  val_batch_size: ${oc.env:VAL_BATCH_SIZE,64}
-  max_prompt_length: ${oc.env:MAX_PROMPT_LENGTH,4096}
+  val_batch_size: ${oc.decode:${oc.env:VAL_BATCH_SIZE,64}}
+  max_prompt_length: ${oc.decode:${oc.env:MAX_PROMPT_LENGTH,4096}}
   filter_overlong_prompts: false   # 评测 1:1 全量，不滤超长 prompt
   dataloader_num_workers: 0
 
-# ---- reward：与训练同源（RewardLoopManager + qa_em）----
+# ---- reward：与训练同源（RewardLoopManager + search_r1_score）----
 # 注意：verl 0.9.0 的 validate 标志传不过 agent loop（search_r1_reward_manager
-# docstring），所以训练 val 实际走 _train_score（qa_em，EM）—— 评测对齐同样
-# 只有 EM（reward_extra_info["acc"]），无 F1/judge。
+# docstring），所以训练 val 实际走 _train_score —— 评测对齐同样只有 EM
+# （reward_extra_info["acc"]），无 F1。use_judge=false 时 EM 未命中直接 0。
 reward:
-  num_workers: ${oc.env:REWARD_NUM_WORKERS,4}
+  num_workers: ${oc.decode:${oc.env:REWARD_NUM_WORKERS,4}}
   custom_reward_function:
     path: ${oc.env:WORKSPACE}/quarl/reward/score/search_r1_score.py
     name: compute_score
     reward_kwargs:
       format_check: ${oc.env:FORMAT_CHECK,qwen3}   # hermes 协议（qwen3_hermes.jinja）；qwen3_5 / search_r1 可选
-      use_judge: ${oc.env:USE_JUDGE,true}          # false = EM 未命中直接 0，不调 LLM judge
+      use_judge: ${oc.decode:${oc.env:USE_JUDGE,true}}  # false = EM 未命中直接 0，不调 LLM judge
   reward_manager:
     source: importlib
     name: SearchR1RewardManager
@@ -45,31 +57,34 @@ reward:
 
 actor_rollout_ref:
   model:
-    path: ${model_path}
+    # 自带 env 插值（不写 ${model_path}）：worker 只拿到本子树，跨根插值会 KeyError
+    path: ${oc.env:MODEL_PATH,/data/models/Qwen3-4B}
     custom_chat_template: ${oc.env:HERMES_JINJA,null}   # hermes 模板（launcher export）
   rollout:
-    name: vllm
-    mode: async                       # 只起 vLLM agent loop workers，不起 FSDP actor
+    name: ${oc.env:ROLLOUT_BACKEND,vllm}   # vllm | sglang（机器上装了哪个用哪个）
+    mode: async                            # 只起 rollout agent loop workers，不起 FSDP actor
+    tensor_model_parallel_size: ${oc.decode:${oc.env:ROLLOUT_TP,1}}
     agent:
-      num_workers: ${oc.env:NUM_WORKERS,1}
-    max_num_seqs: ${oc.env:MAX_NUM_SEQS,256}
-    gpu_memory_utilization: ${oc.env:GPU_MEMORY_UTILIZATION,0.7}
-    prompt_length: ${oc.env:MAX_PROMPT_LENGTH,4096}
-    response_length: ${oc.env:MAX_RESPONSE_LENGTH,8192}
+      num_workers: ${oc.decode:${oc.env:NUM_WORKERS,1}}
+    max_num_seqs: ${oc.decode:${oc.env:MAX_NUM_SEQS,256}}
+    gpu_memory_utilization: ${oc.decode:${oc.env:GPU_MEMORY_UTILIZATION,0.7}}
+    prompt_length: ${oc.decode:${oc.env:MAX_PROMPT_LENGTH,4096}}
+    response_length: ${oc.decode:${oc.env:MAX_RESPONSE_LENGTH,8192}}
     max_model_len: 12288              # = prompt 4096 + response 8192
-    n: ${n}
+    # 自带 env 插值（不写 ${n}）：同上，worker 解析不到根级 n
+    n: ${oc.decode:${oc.env:ROLLOUT_N,5}}
     # validate=True 时生成采样参数来自 val_kwargs（与 RayPPOTrainer._validate 一致）
     val_kwargs:
-      n: ${n}                          # 每题采样数（与顶层 n 一致）
-      temperature: ${oc.env:TEMPERATURE,0.0}   # 0.0 = greedy（评估标准）
+      n: ${oc.decode:${oc.env:ROLLOUT_N,5}}              # 每题采样数（与 rollout.n 一致）
+      temperature: ${oc.decode:${oc.env:TEMPERATURE,0.0}}  # 0.0 = greedy（评估标准）
       top_p: 1.0
       top_k: -1
       do_sample: false
     # verl 原生 trace：每个样本的 agent loop run 由 rollout_trace_op 装饰器
     # 记录（worker 内异步、batch 间同步），配置直接给 worker（与训练一致）。
-    # 切换后端/null 由 sh 的 TRACE_BACKEND 经 CLI 覆盖。
+    # backend 可经 TRACE_BACKEND 覆盖（null = 只留 trajectories.jsonl）。
     trace:
-      backend: mlflow
+      backend: ${oc.env:TRACE_BACKEND,mlflow}
       token2text: true
       project_name: rollout_eval
       experiment_name: rollout_eval_baseline
@@ -78,5 +93,5 @@ actor_rollout_ref:
       max_parallel_calls: 3
 
 trainer:
-  n_gpus_per_node: ${oc.env:N_GPUS_PER_NODE,1}
-  nnodes: ${oc.env:NNODES,1}
+  n_gpus_per_node: ${oc.decode:${oc.env:N_GPUS_PER_NODE,1}}
+  nnodes: ${oc.decode:${oc.env:NNODES,1}}

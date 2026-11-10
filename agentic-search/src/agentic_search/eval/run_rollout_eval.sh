@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Standalone 三模式 rollout 评估（Search-R1 / SSP 基线）。
-# 不起 FSDP trainer，只起 vLLM agent loop workers（verl AgentLoopManager）。
-# 用法：MODE=no_tool bash run_rollout_eval.sh   （MODE: agentic | single | no_tool）
+# 不起 FSDP trainer，只起 rollout agent loop workers（verl AgentLoopManager）。
+#
+# 用法：
+#   MODE=no_tool bash run_rollout_eval.sh                 # 用 env 默认值
+#   bash run_rollout_eval.sh n=1 max_samples=64           # 临时 CLI 覆盖（原样透传）
+#   MODE=agentic bash run_rollout_eval.sh                 # MODE: agentic | single | no_tool
+#
+# 参数来源优先级：CLI 覆盖（"$@"） > env > yaml 默认值。
+# 数值/布尔类 env 由 yaml 的 `${oc.decode:${oc.env:...}}` 还原类型，
+# 不会退化成字符串（见 config/rollout_eval_base.yaml 顶部注释）。
 #
 # 产出：$OUTPUT_DIR/{mode}_trajectories.jsonl（每题每采样完整轨迹 + rm_score + 分量）
 #       聚合指标进 mlflow（val-core / val-aux，每个 mode 一个 experiment run）
@@ -26,7 +34,7 @@ fi
 # hermes chat template（与训练 launcher 一致，经 env 传给 config）
 export HERMES_JINJA="${HERMES_JINJA:-$(cat "$TRAINING_DIR/quarl/template/qwen3_hermes.jinja")}"
 
-# ---- judge（敏感配置在 .env 的 JUDGE_* 中；未设置时用默认值兜底）----
+# ---- judge（敏感配置在 .env 的 JUDGE_* 中；USE_JUDGE=false 时不会被调用）----
 export JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://judge_host:5000/v1}"
 export JUDGE_MODEL="${JUDGE_MODEL:-judge_model_name}"
 export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
@@ -34,27 +42,43 @@ export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
 # ---- trace（verl 原生：worker 内 rollout_trace_op 装饰器逐样本异步记录）----
 # 与训练共用 MLFLOW_TRACKING_URI（同一 sqlite），但独立 experiment（rollout_eval）
 export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////data/mlruns.db}"
-TRACE_BACKEND="${TRACE_BACKEND:-mlflow}"    # mlflow | trackio | null（null = 只留 jsonl）
+export TRACE_BACKEND="${TRACE_BACKEND:-mlflow}"   # mlflow | trackio | null（null = 只留 jsonl）
 
-# ---- eval 参数 ----
-# 非数值（路径/模式/后端）可经 env 覆盖；数值参数写死 CLI（不读 env，
-# 避免 ${oc.env:...} 字符串坑 —— Hydra CLI 文本会被类型推断）
-MODE="${MODE:-agentic}"                       # agentic | single | no_tool
-MODEL_PATH="${MODEL_PATH:-/data/models/Qwen3-4B}"
-DATA_PATH="${DATA_PATH:-/data/xuwentao_data/ssp/test.jsonl}"
-OUTPUT_DIR="${OUTPUT_DIR:-/tmp/rollout_eval}"
+# ============================================================
+# eval 参数：全部 export 给 yaml（yaml 用 oc.decode 保证类型）
+# 需要临时改：在命令行追加 hydra 覆盖即可，例如 n=1 max_samples=64
+# ============================================================
+# ---- 路径 / 模式 / 后端 ----
+export MODE="${MODE:-agentic}"                          # agentic | single | no_tool
+export MODEL_PATH="${MODEL_PATH:-/data/models/Qwen3-4B}"
+export DATA_PATH="${DATA_PATH:-/data/xuwentao_data/ssp/test.jsonl}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/tmp/rollout_eval}"
+export ROLLOUT_BACKEND="${ROLLOUT_BACKEND:-vllm}"       # vllm | sglang
+export FORMAT_CHECK="${FORMAT_CHECK:-qwen3}"            # qwen3 | qwen3_5 | search_r1
+
+# ---- 数值（由 yaml 的 oc.decode 还原成 int/float/bool）----
+export ROLLOUT_N="${ROLLOUT_N:-5}"                      # 每题采样数
+export MAX_SAMPLES="${MAX_SAMPLES:--1}"                 # 只跑前 N 题（-1 = 全部）
+export LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-20}" # 样例表格进 mlflow 的数量（0 = 不记）
+export VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"
+export MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
+export MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
+export TEMPERATURE="${TEMPERATURE:-0.0}"                # 0.0 = greedy
+export USE_JUDGE="${USE_JUDGE:-true}"                   # false = EM 未命中直接 0
+
+# ---- 并行 / 显存 ----
+export N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-1}"
+export NNODES="${NNODES:-1}"
+export ROLLOUT_TP="${ROLLOUT_TP:-1}"                    # 单卡必须 1；需 world_size % tp == 0
+export NUM_WORKERS="${NUM_WORKERS:-1}"                  # rollout agent loop worker 数
+export MAX_NUM_SEQS="${MAX_NUM_SEQS:-256}"
+export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"
+export REWARD_NUM_WORKERS="${REWARD_NUM_WORKERS:-4}"
 
 cd "$EVAL_DIR"
-# --config-name 选择三种模式的配置（rollout_eval_agentic / _single / _no_tool）
-# 数值参数改时直接改下面几行（或 yaml）
+# --config-name 选择三种模式的配置；"$@" 原样透传，用于临时覆盖任意字段
+# 例：bash run_rollout_eval.sh n=1 max_samples=64 \
+#       reward.custom_reward_function.reward_kwargs.use_judge=false
 python3 rollout_eval.py \
     --config-name "rollout_eval_${MODE}" \
-    model_path="$MODEL_PATH" \
-    data.val_files="[\"${DATA_PATH}\"]" \
-    output_dir="$OUTPUT_DIR" \
-    n=5 \
-    max_samples=-1 \
-    log_val_generations=20 \
-    actor_rollout_ref.rollout.val_kwargs.temperature=0.0 \
-    trainer.n_gpus_per_node=1 \
-    actor_rollout_ref.rollout.trace.backend="$TRACE_BACKEND"
+    "$@"
