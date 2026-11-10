@@ -63,7 +63,10 @@ export TRACE_BACKEND="${TRACE_BACKEND:-mlflow}"   # mlflow | trackio | null（nu
 export MODE="${MODE:-agentic}"                          # agentic | single | no_tool
 export MODEL_PATH="${MODEL_PATH:-/data/models/Qwen3-4B}"
 export DATA_PATH="${DATA_PATH:-/data/xuwentao_data/ssp/test.jsonl}"
-export OUTPUT_DIR="${OUTPUT_DIR:-/tmp/rollout_eval}"
+# 每次 eval 产出一个独立子文件夹（traj_viewer.py 会把它们列成 run 列表），
+# 默认落在 /data/eval 下。想复用固定目录就显式传 OUTPUT_DIR=...
+export RUN_NAME="${RUN_NAME:-$(date +%Y%m%d_%H%M%S)}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/data/eval/${RUN_NAME}}"
 export ROLLOUT_BACKEND="${ROLLOUT_BACKEND:-vllm}"       # vllm | sglang
 export FORMAT_CHECK="${FORMAT_CHECK:-qwen3}"            # qwen3 | qwen3_5 | search_r1
 

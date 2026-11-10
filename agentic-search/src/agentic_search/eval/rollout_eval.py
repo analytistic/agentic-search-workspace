@@ -319,6 +319,7 @@ def main(config):
             row = {
                 "index": extra.get("index", i),
                 "mode": mode,
+                "data_source": data_sources[i],
                 "question": extra.get("question"),
                 "num_turns": turns,
                 "ground_truth": (ground_truths[i] or {}).get("target") if ground_truths[i] else None,
