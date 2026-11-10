@@ -45,7 +45,7 @@ def _runs():
     for d in sorted(ROOT.iterdir()):
         if not d.is_dir():
             continue
-        files = sorted(d.glob("*_trajectories.jsonl"))
+        files = sorted(d.glob("*_trajectories.jsonl")) or sorted(d.glob("*.jsonl")) or sorted(d.glob("*.json"))
         if files:
             out.append((d.name, files[0]))
     return out
@@ -237,7 +237,7 @@ async function pickFolder(name){
 }
 
 function applyFilter(reset){
-  filtered = bench==='all' ? rows.map((_,i)=>i) : rows.map((r,i)=>[r,i]).filter(([r])=>r.data_source===bench).map(([,i])=>i);
+  filtered = bench==='all' ? rows.map(r=>r.i) : rows.filter(r=>r.data_source===bench).map(r=>r.i);
   if(reset) cur=0;
   if(cur>=filtered.length) cur=0;
   render();
@@ -280,11 +280,11 @@ async function render(){
   }).join('')||'<span style="color:var(--muted)">no metrics</span>';
 
   let t=r.trajectory||'';
-  if($('hidepad').checked){
-    const pad=/<\|endoftext\|>/g;
-    const hits=(t.match(pad)||[]).length;
-    if(hits) t=t.replace(/(?:<\|endoftext\|>){2,}/g,`\n[… ${hits} padding tokens 已折叠 …]\n`);
-  }
+    if($('hidepad').checked){
+      const pad=/<\|endoftext\|>/g;
+      const hits=(t.match(pad)||[]).length;
+      if(hits) t=t.replace(/(?:<\|endoftext\|>[\r\n]*){2,}/g,`\n[… ${hits} padding tokens 已折叠 …]\n`);
+    }
   $('traj').textContent=t;
   $('traj').scrollTop=0;
 }
