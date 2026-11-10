@@ -24,8 +24,13 @@ from verl.tools.function_tool import function_tool
 # ToolAgentLoop picks the parser.
 from quarl.agent_loop.tool_parser import SearchToolParser  # noqa: F401
 
-TIMEOUT = 3  # per-request timeout for /retrieve (seconds)
-MAX_RETRIES = 2  # initial attempt + 1 retry (worst case ~7s incl. delay: fail fast instead of hanging the trajectory)
+# 3 s is right when the retriever answers in milliseconds, which is the case on
+# GPU-backed BM25/dense services. On a CPU-only faiss index (e.g. an eval box with
+# no faiss-gpu) the server serialises requests, so a 32-way rollout queues for
+# seconds per call and every search times out -- the agent then answers from
+# memory and the trajectory contains no <search> at all. Override per host.
+TIMEOUT = float(os.environ.get("SEARCH_TIMEOUT", "3"))
+MAX_RETRIES = int(os.environ.get("SEARCH_MAX_RETRIES", "2"))  # initial attempt + 1 retry
 INITIAL_RETRY_DELAY = 1
 TOPK = 3
 

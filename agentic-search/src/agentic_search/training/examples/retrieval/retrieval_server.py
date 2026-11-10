@@ -800,8 +800,16 @@ def _trim_docs(docs: List[dict]) -> List[dict]:
 
 
 @app.post("/retrieve")
-async def retrieve_endpoint(request: QueryRequest):
+def retrieve_endpoint(request: QueryRequest):
     """Batch retrieval.
+
+    Deliberately a plain ``def``, not ``async def``: the body calls
+    ``retriever.batch_search``, which blocks on faiss/lucene. Declared async,
+    that call stalls the whole event loop, so with N concurrent rollout workers
+    the requests are serialised and the last ones wait N x latency -- enough to
+    blow through the client's timeout on a CPU-only index, which silently
+    degrades every search failure into "the model answers from memory".
+    A sync endpoint runs in starlette's threadpool instead.
 
     Request:  {"queries": [...], "topk": 3, "return_scores": true}
     Response: {"result": [[{"document": {...}, "score": 0.71}, ...], ...],
