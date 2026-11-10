@@ -284,7 +284,14 @@ def main(config):
         result = unpad_dataproto(result, pad_size=pad_size)
 
         # 4. decode + union back (same as RayPPOTrainer._validate L660-666)
-        output_texts = [tokenizer.decode(ids, skip_special_tokens=False) for ids in result.batch["responses"]]
+        # responses 是右 padding 到 response_length，padding 的 pad_token_id decode 出来
+        # 是几千个 <|endoftext|>；用 attention_mask 的 response 切片过滤掉，
+        # tool observation 在该 mask 里同样是 1，会完整保留。
+        valid_response_mask = result.batch["attention_mask"][:, result.batch["prompts"].shape[1] :].bool()
+        output_texts = [
+            tokenizer.decode(ids[mask], skip_special_tokens=False)
+            for ids, mask in zip(result.batch["responses"], valid_response_mask)
+        ]
         sample_outputs.extend(output_texts)
         test_batch = test_batch.union(result)
         test_batch.meta_info["validate"] = True
