@@ -124,8 +124,9 @@ HTML = r"""<!doctype html>
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--txt);
-  font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif}
-header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;
+  display:flex;flex-direction:column;overflow:hidden}
+header{flex:0 0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
   padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
 h1{font-size:15px;font-weight:500;margin:0 8px 0 0}
 label{font-size:12px;color:var(--muted);margin-right:6px}
@@ -137,7 +138,15 @@ button{font:inherit;font-size:13px;padding:5px 11px;border:1px solid var(--line)
 button:hover{background:var(--chip)}
 button:disabled{opacity:.4;cursor:default}
 #root-path{font:12px var(--mono);color:var(--muted)}
-main{padding:18px 20px 100px;max-width:1400px;margin:0 auto}
+main{flex:1;min-height:0;padding:16px 20px;display:grid;
+  grid-template-columns:300px minmax(0,1fr);gap:16px}
+.side{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:14px}
+.side .card{margin-bottom:0}
+.trace{min-height:0;display:flex;flex-direction:column}
+.trace .card{flex:1;min-height:0;margin-bottom:0;display:flex;flex-direction:column}
+.tools{display:flex;align-items:center;gap:12px}
+#copy{border-color:var(--accent);color:var(--accent)}
+#copy.ok{background:var(--accent-bg)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
 .q{font-size:14px;font-weight:500;margin:0 0 8px}
 .kv{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--muted)}
@@ -151,9 +160,9 @@ main{padding:18px 20px 100px;max-width:1400px;margin:0 auto}
 .cardhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .cardhead h2{font-size:13px;font-weight:500;margin:0}
 pre{margin:0;font:12.5px/1.65 var(--mono);white-space:pre-wrap;word-break:break-word;
-  background:var(--panel);padding:0;max-height:58vh;overflow:auto}
+  background:var(--panel);padding:0;flex:1;min-height:0;overflow:auto}
 .tog{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer}
-footer{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);
+footer{flex:0 0 auto;background:var(--panel);border-top:1px solid var(--line);
   padding:10px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .nav{display:flex;align-items:center;gap:6px}
 .nav input{width:78px;text-align:center}
@@ -161,6 +170,11 @@ footer{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top
 .spacer{flex:1}
 #status{font-size:12px;color:var(--muted)}
 .padnote{color:var(--muted);font-style:italic}
+@media(max-width:900px){
+  main{grid-template-columns:1fr;overflow:auto}
+  .side{overflow:visible}
+  .trace .card{min-height:60vh}
+}
 </style>
 </head>
 <body>
@@ -173,21 +187,28 @@ footer{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top
 </header>
 
 <main>
-  <div class="card">
-    <div class="q" id="question">—</div>
-    <div class="kv" id="kv"></div>
-  </div>
-  <div class="card">
-    <div class="cardhead"><h2>Metrics</h2></div>
-    <div class="metrics" id="metrics"></div>
-  </div>
-  <div class="card">
-    <div class="cardhead">
-      <h2>Trajectory</h2>
-      <label class="tog"><input type="checkbox" id="hidepad" checked> 折叠 padding</label>
+  <aside class="side">
+    <div class="card">
+      <div class="q" id="question">—</div>
+      <div class="kv" id="kv"></div>
     </div>
-    <pre id="traj">—</pre>
-  </div>
+    <div class="card">
+      <div class="cardhead"><h2>Metrics</h2></div>
+      <div class="metrics" id="metrics"></div>
+    </div>
+  </aside>
+  <section class="trace">
+    <div class="card">
+      <div class="cardhead">
+        <h2>Trajectory</h2>
+        <div class="tools">
+          <label class="tog"><input type="checkbox" id="hidepad" checked> 折叠 padding</label>
+          <button id="copy" title="复制当前轨迹原文（不受折叠开关影响）">复制轨迹</button>
+        </div>
+      </div>
+      <pre id="traj">—</pre>
+    </div>
+  </section>
 </main>
 
 <footer>
@@ -203,7 +224,7 @@ footer{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top
 </footer>
 
 <script>
-let runs=[], rows=[], filtered=[], cur=0, folder='', bench='all';
+let runs=[], rows=[], filtered=[], cur=0, folder='', bench='all', currentRaw='';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -251,6 +272,7 @@ async function render(){
   $('count').textContent=n?`${cur+1} / ${n}`:'0 / 0';
   $('goto').value=n?cur+1:0;
   if(!n){
+    currentRaw='';
     $('question').textContent='—'; $('kv').innerHTML=''; $('metrics').innerHTML='';
     $('traj').textContent='（该 bench 没有轨迹）'; $('status').textContent='';
     return;
@@ -279,7 +301,8 @@ async function render(){
     return `<div class="metric ${cls}"><span class="k">${esc(k)}</span><span class="v">${esc(shown)}</span></div>`;
   }).join('')||'<span style="color:var(--muted)">no metrics</span>';
 
-  let t=r.trajectory||'';
+  currentRaw=r.trajectory||'';
+  let t=currentRaw;
     if($('hidepad').checked){
       const pad=/<\|endoftext\|>/g;
       const hits=(t.match(pad)||[]).length;
@@ -305,6 +328,31 @@ $('goto').addEventListener('change',e=>{
   if(n&&Number.isFinite(v)){cur=Math.max(0,Math.min(n-1,v-1));render();}
 });
 $('hidepad').addEventListener('change',()=>render());
+async function copyText(s){
+  try{
+    if(navigator.clipboard&&window.isSecureContext){
+      await navigator.clipboard.writeText(s);
+      return true;
+    }
+  }catch(e){}
+  const ta=document.createElement('textarea');
+  ta.value=s;
+  ta.setAttribute('readonly','');
+  ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok=false;
+  try{ok=document.execCommand('copy');}catch(e){}
+  document.body.removeChild(ta);
+  return ok;
+}
+$('copy').addEventListener('click',async()=>{
+  const ok=await copyText(currentRaw);
+  const b=$('copy');
+  b.textContent=ok?'已复制':'复制失败';
+  b.classList.toggle('ok',ok);
+  setTimeout(()=>{b.textContent='复制轨迹';b.classList.remove('ok');},1500);
+});
 window.addEventListener('keydown',e=>{
   if(document.activeElement&&document.activeElement.tagName==='INPUT') return;
   if(e.key==='ArrowLeft'){e.preventDefault();go(-1);}

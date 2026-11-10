@@ -284,21 +284,28 @@ def main(config):
         result = unpad_dataproto(result, pad_size=pad_size)
 
         # 4. decode + union back (same as RayPPOTrainer._validate L660-666)
-        # responses 是右 padding 到 response_length，padding 的 pad_token_id decode 出来
-        # 是几千个 <|endoftext|>；用 attention_mask 的 response 切片过滤掉，
-        # tool observation 在该 mask 里同样是 1，会完整保留。
-        valid_response_mask = result.batch["attention_mask"][:, result.batch["prompts"].shape[1] :].bool()
+        # attention_mask 里 0 只有左右 padding（tool observation 同样是 1）。
+        # 落盘要的是完整轨迹：prompt + 全程 tool/assistant，所以从 input_ids
+        # 整段一次 decode；response-only 文本仍留给 ValidationGenerationsLogger。
+        full_mask = result.batch["attention_mask"].bool()
+        prompt_len = result.batch["prompts"].shape[1]
+        full_texts = [
+            tokenizer.decode(ids[mask], skip_special_tokens=False)
+            for ids, mask in zip(result.batch["input_ids"], full_mask)
+        ]
         output_texts = [
             tokenizer.decode(ids[mask], skip_special_tokens=False)
-            for ids, mask in zip(result.batch["responses"], valid_response_mask)
+            for ids, mask in zip(result.batch["responses"], full_mask[:, prompt_len:])
         ]
         sample_outputs.extend(output_texts)
         test_batch = test_batch.union(result)
         test_batch.meta_info["validate"] = True
 
         # Store original inputs (same as training: decode the rendered prompt tensor)
-        input_ids = test_batch.batch["prompts"]
-        input_texts = [tokenizer.decode(ids, skip_special_tokens=False) for ids in input_ids]
+        input_texts = [
+            tokenizer.decode(ids[mask], skip_special_tokens=False)
+            for ids, mask in zip(result.batch["prompts"], full_mask[:, :prompt_len])
+        ]
         sample_inputs.extend(input_texts)
         sample_uids.extend(test_batch.non_tensor_batch["uid"])
 
@@ -320,7 +327,7 @@ def main(config):
         num_turns = test_batch.non_tensor_batch["__num_turns__"]
         reward_component_keys = list(reward_extra_info.keys())
         batch_rows = []
-        for i, text in enumerate(output_texts):
+        for i, text in enumerate(full_texts):
             extra = extra_infos[i] if isinstance(extra_infos[i], dict) else {}
             turns = int(num_turns[i])
             row = {
