@@ -63,6 +63,14 @@ actor_rollout_ref:
   rollout:
     name: ${oc.env:ROLLOUT_BACKEND,vllm}   # vllm | sglang（机器上装了哪个用哪个）
     mode: async                            # 只起 rollout agent loop workers，不起 FSDP actor
+    # MUST NOT stay at verl's default "dummy". Dummy means the engine never reads
+    # the checkpoint and runs on randomly initialised weights -- fine while
+    # training (the actor pushes real weights via update_weights before step 1),
+    # fatal when evaluating, because there is no actor to sync from.
+    # Symptom: every sample produces the same degenerate token loop (e.g.
+    # "[state发展前景" repeated to max_response_length, finish_reason=length),
+    # independent of the prompt, while prompt/template/tokenizer all look correct.
+    load_format: ${oc.env:ROLLOUT_LOAD_FORMAT,safetensors}
     tensor_model_parallel_size: ${oc.decode:${oc.env:ROLLOUT_TP,1}}
     agent:
       num_workers: ${oc.decode:${oc.env:NUM_WORKERS,1}}
