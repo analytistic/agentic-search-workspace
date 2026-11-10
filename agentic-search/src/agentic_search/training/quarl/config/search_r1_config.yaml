@@ -20,8 +20,10 @@ algorithm:
 reward:
   num_workers: 8
   custom_reward_function:
-    path: ${oc.env:WORKSPACE}/quarl/reward/score/qa_em.py
+    path: ${oc.env:WORKSPACE}/quarl/reward/score/search_r1_score.py
     name: compute_score
+    reward_kwargs:
+      format_check: qwen3   # hermes 协议（qwen3_hermes.jinja）；qwen3_5 / search_r1 可选
   reward_manager:
     source: importlib
     name: SearchR1RewardManager

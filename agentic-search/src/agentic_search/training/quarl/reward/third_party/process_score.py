@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List
 
-from quarl.reward.score.outcome_score import em_check, extract_math_solution, extract_solution
+from quarl.reward.third_party.outcome_score import em_check, extract_math_solution, extract_solution
 from quarl.utils.llm_as_a_judge import get_global_judge
 
 # Broken search-tag patterns that indicate the model has entered a degenerate

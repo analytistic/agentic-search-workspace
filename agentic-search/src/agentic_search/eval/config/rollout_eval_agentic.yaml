@@ -1,0 +1,20 @@
+# 带检索器（多轮）：tool_agent 循环，最多 10 轮 search + 回答。
+# 用法：python3 rollout_eval.py --config-name rollout_eval_agentic
+
+hydra:
+  searchpath:
+    - file://${oc.env:WORKSPACE,./}/verl/verl/trainer/config
+
+defaults:
+  - rollout_eval_base
+  - _self_
+
+mode: agentic
+
+actor_rollout_ref:
+  rollout:
+    agent:
+      default_agent_loop: tool_agent
+    multi_turn:
+      max_assistant_turns: 10
+      function_tool_path: ${oc.env:WORKSPACE}/quarl/tool/search_tool_fn.py

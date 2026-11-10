@@ -402,30 +402,6 @@ def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
             reward_fn_key=config.data.reward_fn_key,
             **reward_kwargs,
         )
-    elif reward_manager_name in ["ssp_kg", "search_r1", "ssp"]:
-        from quarl.reward import get_custom_reward_fns
-        from quarl.reward.manager import SSPRewardManager
-
-        return SSPRewardManager(
-            tokenizer=tokenizer,
-            num_examine=num_examine,
-            reward_fns=get_custom_reward_fns(config),
-            reward_fn_key=config.data.reward_fn_key,
-            save_records=False,
-            save_path=config.reward_model.get("save_path", None),
-        )
-    elif reward_manager_name == "naive_with_prompt":
-        from quarl.reward.manager import NaiveRewardManagerComputeWithPrompt
-
-        return NaiveRewardManagerComputeWithPrompt(
-            tokenizer=tokenizer,
-            num_examine=num_examine,
-            compute_score=get_custom_reward_fn(config),
-            reward_fn_key=config.data.reward_fn_key,
-            save_records=False,
-            save_path=config.reward_model.get("save_path", None),
-            **reward_kwargs,
-        )
     else:
         raise NotImplementedError(f"Unsupported reward manager: {reward_manager_name}")
 

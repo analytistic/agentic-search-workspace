@@ -1,0 +1,81 @@
+# Standalone rollout 评估公共配置（被三个模式配置继承）：
+#   rollout_eval_agentic.yaml / rollout_eval_single.yaml / rollout_eval_no_tool.yaml
+# 模式差异字段写在各自配置里；这里只放公共部分。
+# 注意：hydra.searchpath 只允许写在主配置（三个模式 yaml）里。
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+# ---- eval 参数（sh 里可覆盖）----
+model_path: ${oc.env:MODEL_PATH,/data/models/Qwen3-4B}
+output_dir: ${oc.env:OUTPUT_DIR,outputs/rollout_eval}
+n: ${oc.env:ROLLOUT_N,5}              # 每题采样数
+max_samples: ${oc.env:MAX_SAMPLES,-1} # 只跑前 N 题（-1 = 全部）
+log_val_generations: ${oc.env:LOG_VAL_GENERATIONS,20}  # 验证样例表格记入 mlflow artifact 的数量（0 = 不记）
+
+# ---- data：复用 verl val 数据流（create_rl_dataset + StatefulDataLoader）----
+data:
+  val_files: ["${oc.env:DATA_PATH,/data/xuwentao_data/ssp/test.jsonl}"]
+  val_batch_size: ${oc.env:VAL_BATCH_SIZE,64}
+  max_prompt_length: ${oc.env:MAX_PROMPT_LENGTH,4096}
+  filter_overlong_prompts: false   # 评测 1:1 全量，不滤超长 prompt
+  dataloader_num_workers: 0
+
+# ---- reward：与训练同源（RewardLoopManager + qa_em）----
+# 注意：verl 0.9.0 的 validate 标志传不过 agent loop（search_r1_reward_manager
+# docstring），所以训练 val 实际走 _train_score（qa_em，EM）—— 评测对齐同样
+# 只有 EM（reward_extra_info["acc"]），无 F1/judge。
+reward:
+  num_workers: ${oc.env:REWARD_NUM_WORKERS,4}
+  custom_reward_function:
+    path: ${oc.env:WORKSPACE}/quarl/reward/score/search_r1_score.py
+    name: compute_score
+    reward_kwargs:
+      format_check: ${oc.env:FORMAT_CHECK,qwen3}   # hermes 协议（qwen3_hermes.jinja）；qwen3_5 / search_r1 可选
+  reward_manager:
+    source: importlib
+    name: SearchR1RewardManager
+    module:
+      path: ${oc.env:WORKSPACE}/quarl/reward/manager/search_r1_reward_manager.py
+      name: custom_reward_manager
+  reward_model:
+    enable: false   # rule-based + judge（judge 在 reward fn 内 HTTP 调用）
+
+actor_rollout_ref:
+  model:
+    path: ${model_path}
+    custom_chat_template: ${oc.env:HERMES_JINJA,null}   # hermes 模板（launcher export）
+  rollout:
+    name: vllm
+    mode: async                       # 只起 vLLM agent loop workers，不起 FSDP actor
+    agent:
+      num_workers: ${oc.env:NUM_WORKERS,1}
+    max_num_seqs: ${oc.env:MAX_NUM_SEQS,256}
+    gpu_memory_utilization: ${oc.env:GPU_MEMORY_UTILIZATION,0.7}
+    prompt_length: ${oc.env:MAX_PROMPT_LENGTH,4096}
+    response_length: ${oc.env:MAX_RESPONSE_LENGTH,8192}
+    max_model_len: 12288              # = prompt 4096 + response 8192
+    n: ${n}
+    # validate=True 时生成采样参数来自 val_kwargs（与 RayPPOTrainer._validate 一致）
+    val_kwargs:
+      n: ${n}                          # 每题采样数（与顶层 n 一致）
+      temperature: ${oc.env:TEMPERATURE,0.0}   # 0.0 = greedy（评估标准）
+      top_p: 1.0
+      top_k: -1
+      do_sample: false
+    # verl 原生 trace：每个样本的 agent loop run 由 rollout_trace_op 装饰器
+    # 记录（worker 内异步、batch 间同步），配置直接给 worker（与训练一致）。
+    # 切换后端/null 由 sh 的 TRACE_BACKEND 经 CLI 覆盖。
+    trace:
+      backend: mlflow
+      token2text: true
+      project_name: rollout_eval
+      experiment_name: rollout_eval_baseline
+      max_samples_per_step_per_worker: null  # null = 每题全量
+    multi_turn:
+      max_parallel_calls: 3
+
+trainer:
+  n_gpus_per_node: ${oc.env:N_GPUS_PER_NODE,1}
+  nnodes: ${oc.env:NNODES,1}

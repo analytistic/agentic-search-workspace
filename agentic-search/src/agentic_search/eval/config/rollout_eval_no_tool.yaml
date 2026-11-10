@@ -1,0 +1,19 @@
+# 不带检索器：single_turn_agent 循环，纯单轮生成，无工具注册。
+# 用法：python3 rollout_eval.py --config-name rollout_eval_no_tool
+
+hydra:
+  searchpath:
+    - file://${oc.env:WORKSPACE,./}/verl/verl/trainer/config
+
+defaults:
+  - rollout_eval_base
+  - _self_
+
+mode: no_tool
+
+actor_rollout_ref:
+  rollout:
+    agent:
+      default_agent_loop: single_turn_agent
+    multi_turn:
+      function_tool_path: null

@@ -1,28 +1,19 @@
 """Search-R1 reward manager for verl 0.9.0.
 
-Training scores with ``qa_em.compute_score`` (exact match); validation scores
-with the richer ``search_eval_score.compute_score`` (EM + F1 + judge),
-preserving the legacy ``reward_fn`` / ``val_reward_fn`` split.
-
-NOTE: with verl's stock ``ToolAgentLoop`` (``agent.default_agent_loop:
-tool_agent``) the validate flag is no longer attached by a custom agent loop
-(verl 0.9.0 does not carry ``meta_info["validate"]`` past the agent loop), so
-``non_tensor_batch["validate"]`` is always absent -> training scoring
-(``qa_em``) applies to every sample, including validation runs. To restore
-the train/validation split, either re-attach the flag (a thin loop wrapper /
-dataset ``extra_info`` field) or run validation with a separate reward config.
+The scoring function comes entirely from the config: ``load_reward_manager``
+resolves ``reward.custom_reward_function`` and injects it as ``compute_score``
+into this manager, so training and validation share the same function --
+verl 0.9.0 has a single custom_reward_function slot, and the validate flag
+does not survive the agent loop anyway.
 """
 
 import inspect
 
 from verl.experimental.reward_loop.reward_manager.base import RewardManagerBase
 
-from quarl.reward.score.qa_em import compute_score as _train_compute_score
-from quarl.reward.score.search_eval_score import compute_score as _val_compute_score
-
 
 class SearchR1RewardManager(RewardManagerBase):
-    """Dispatch on the validate flag: training -> qa_em, validation -> search_eval_score."""
+    """Scores every trajectory with the config-provided compute_score."""
 
     def __init__(self, config, tokenizer, compute_score=None, reward_router_address=None, reward_model_tokenizer=None):
         super().__init__(config, tokenizer, compute_score)
@@ -31,8 +22,6 @@ class SearchR1RewardManager(RewardManagerBase):
         # accepted (and ignored) here to stay compatible.
         self.reward_router_address = reward_router_address
         self.reward_model_tokenizer = reward_model_tokenizer
-        self._train_score = compute_score or _train_compute_score
-        self._val_score = _val_compute_score
 
     async def run_single(self, data):
         data = data[-1:]  # multi-sequence outputs: score the last sequence
@@ -54,13 +43,14 @@ class SearchR1RewardManager(RewardManagerBase):
         )
 
         validate = bool(data_item.non_tensor_batch.get("validate", False))
-        fn = self._val_score if validate else self._train_score
+        fn = self.compute_score
         if inspect.iscoroutinefunction(fn):
             result = await fn(
                 data_source=data_source,
                 solution_str=response_str,
                 ground_truth=ground_truth,
                 extra_info=extra_info,
+                validate=validate,
             )
         else:
             result = await self.loop.run_in_executor(
@@ -70,6 +60,7 @@ class SearchR1RewardManager(RewardManagerBase):
                     solution_str=response_str,
                     ground_truth=ground_truth,
                     extra_info=extra_info,
+                    validate=validate,
                 ),
             )
 
