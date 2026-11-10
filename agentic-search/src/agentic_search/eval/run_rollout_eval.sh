@@ -23,6 +23,17 @@ TRAINING_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training"
 export WORKSPACE="$TRAINING_DIR"     # search_r1_config.yaml hydra searchpath / function_tool_path
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 
+# ---- 解释器与 CUDA 库 ----
+# 不设 PATH 会落到系统 python（没有 hydra / verl）；不设 LD_LIBRARY_PATH 时
+# spawn 出的 worker 会先解析到系统 cuda 的 libcudart，而 torch 2.9.1+cu128 报
+# "libc10_cuda.so: undefined symbol: cudaGetDriverEntryPointByVersion"。
+PYTHON_BIN_DIR="${PYTHON_BIN_DIR:-/root/miniconda3/bin}"
+export PATH="$PYTHON_BIN_DIR:$PATH"
+NV_LIBS="$(ls -d "$PYTHON_BIN_DIR"/../lib/python3*/site-packages/nvidia/*/lib 2>/dev/null | tr '\n' ':')"
+if [ -n "$NV_LIBS" ]; then
+    export LD_LIBRARY_PATH="${NV_LIBS}${LD_LIBRARY_PATH:-}"
+fi
+
 # ---- .env（可选：环境变量放这里，git 不追踪；未设置项用下方默认值）----
 if [ -f "$EVAL_DIR/.env" ]; then
     set -a
