@@ -39,11 +39,20 @@ fi
 #   "Cuda failure 217 'peer access is not supported between these two devices'"
 # (eval never hits it: each sglang replica owns one card and never talks to the
 # other one, so nothing crosses the PCIe link).
-export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
-export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"   # no InfiniBand on this box
-export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-0}"   # CUDA IPC cumem vs. peer access
-export NCCL_ALGO="${NCCL_ALGO:-Ring}"           # Ring needs less P2P than Tree
-export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"         # verl's runtime_env sets WARN; ours wins
+# --- the 5 NCCL exports below are 4090D-only workarounds; commented out on A800 ---
+# export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+# export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"   # no InfiniBand on this box
+# export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-0}"   # CUDA IPC cumem vs. peer access
+# export NCCL_ALGO="${NCCL_ALGO:-Ring}"           # Ring needs less P2P than Tree
+# export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"         # verl's runtime_env sets WARN; ours wins
+
+# === A800-SXM4 (2x80GB, NVLink NV8 + InfiniBand mlx5_bond_0) ===
+# Datacenter card: CUDA peer access works over NVLink, and the box has real IB.
+# None of the 4090D workarounds above apply - keep P2P and IB ENABLED.
+# NCCL auto-picks Tree over NVLink; just point it at the IB HCA.
+export NCCL_IB_HCA="${NCCL_IB_HCA:-mlx5_bond_0}"   # A800 has real InfiniBand
+export NCCL_NVLS_ENABLE="${NCCL_NVLS_ENABLE:-1}"   # use NVLink SHARP if available
+export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"           # quieter than INFO on A800
 
 # custom chat template: passed via env var (Hydra CLI overrides cannot lex the
 # jinja text); consumed in the config as ${oc.env:HERMES_JINJA}
