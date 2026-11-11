@@ -29,6 +29,9 @@ export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 # other one, so nothing crosses the PCIe link).
 export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
 export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"   # no InfiniBand on this box
+export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-0}"   # CUDA IPC cumem vs. peer access
+export NCCL_ALGO="${NCCL_ALGO:-Ring}"           # Ring needs less P2P than Tree
+export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"         # verl's runtime_env sets WARN; ours wins
 
 # custom chat template: passed via env var (Hydra CLI overrides cannot lex the
 # jinja text); consumed in the config as ${oc.env:HERMES_JINJA}
