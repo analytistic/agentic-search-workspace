@@ -129,11 +129,10 @@ SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
 VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-256}"  # val is n=1 (val_kwargs): saturate sglang like the train batch does (~10 min/val)
 VAL_ONLY="${VAL_ONLY:-False}"
-# Pre-training validation is OFF by default: it costs a full validation
-# rollout pass over VAL_BATCH_SIZE before step 1, which is pure overhead when
-# the model is still untrained. Set VAL_BEFORE_TRAIN=True to get the baseline
-# metrics at step 0.
-VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
+# Pre-training validation runs BEFORE step 1 by default (VAL_BEFORE_TRAIN=True):
+# it gives the step-0 baseline metrics. Costs one full validation rollout pass
+# over VAL_BATCH_SIZE before training starts. Set VAL_BEFORE_TRAIN=False to skip.
+VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-True}"
 # verl only evaluates `val_only` INSIDE the `val_before_train` branch
 # (verl/trainer/ppo/v1/trainer_base.py:421), so VAL_ONLY=True together with
 # VAL_BEFORE_TRAIN=False would silently start training instead of exiting
@@ -236,6 +235,21 @@ if [ "$RANK" -eq 0 ]; then
     "$PYTHON" -m quarl.main_rl \
         --config-name search_r1_config_cuda \
         actor_rollout_ref.model.path="$MODEL_PATH" \
+        data.train_batch_size="$BATCH_SIZE" \
+        data.val_batch_size="$VAL_BATCH_SIZE" \
+        data.max_prompt_length="$MAX_PROMPT_LENGTH" \
+        data.max_response_length="$MAX_RESPONSE_LENGTH" \
+        actor_rollout_ref.actor.ppo_mini_batch_size="$MINI_BATCH_SIZE" \
+        actor_rollout_ref.actor.optim.lr="$LR" \
+        actor_rollout_ref.rollout.n="$ROLLOUT_N" \
+        actor_rollout_ref.rollout.tensor_model_parallel_size="$ROLLOUT_TP" \
+        actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \
+        actor_rollout_ref.rollout.multi_turn.max_assistant_turns="$MAX_TURNS" \
+        trainer.total_epochs="$TOTAL_EPOCHS" \
+        trainer.save_freq="$SAVE_FREQ" \
+        trainer.test_freq="$TEST_FREQ" \
+        trainer.val_only="$VAL_ONLY" \
+        trainer.val_before_train="$VAL_BEFORE_TRAIN" \
         trainer.max_actor_ckpt_to_keep="$MAX_ACTOR_CKPT_TO_KEEP" \
         trainer.default_local_dir="$SAVE_CHECKPOINT_DIR"
 fi
