@@ -13,13 +13,13 @@ set -euo pipefail
 # ========================== CONFIG ==========================
 
 # ---- paths ----
-REPO_ROOT="/home/xuwentao/agentic-search-workspace"
+REPO_ROOT="${REPO_ROOT:-/home/xuwentao/agentic-search-workspace}"
 TRAINING_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training"
 export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searchpath
 
 
 # python for training (server env; local: uv run --project agentic-search)
-PYTHON="python3"
+PYTHON="${PYTHON:-python3}"
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 
 # custom chat template: passed via env var (Hydra CLI overrides cannot lex the
@@ -27,9 +27,9 @@ export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 export SEARCH_R1_JINJA="${SEARCH_R1_JINJA:-$(cat "$TRAINING_DIR/quarl/template/search_r1.jinja")}"
 
 # ---- model / data ----
-MODEL_PATH="/data/models/Qwen2.5-7B-Instruct"
-DATA_PATH="/data/xuwentao_data/search_r1/train.parquet"        # parquet without suffix
-TEST_DATA_PATH="/data/xuwentao_data/ssp/test.jsonl"
+MODEL_PATH="${MODEL_PATH:-/data/models/Qwen2.5-7B-Instruct}"
+DATA_PATH="${DATA_PATH:-/data/xuwentao_data/search_r1/train.parquet}"        # parquet without suffix
+TEST_DATA_PATH="${TEST_DATA_PATH:-/data/xuwentao_data/ssp/test.jsonl}"
 
 # ---- output (checkpoints are large: 7B bf16 + fp32 optimizer ~40-50GB each; keep on /data) ----
 OUTPUT_ROOT="${OUTPUT_ROOT:-/tmp}"
