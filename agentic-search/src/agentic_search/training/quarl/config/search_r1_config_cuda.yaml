@@ -149,10 +149,12 @@ actor_rollout_ref:
     max_num_batched_tokens: 12288
     log_prob_micro_batch_size_per_gpu: 4   # forward-only; bumped 2->4 2026-11-12 (old_log_prob fwd, fewer calls)
     trace:
-      backend: null   # disabled 2026-11-11: synchronous per-trajectory mlflow writes serialize on the
-                      # sqlite write lock; val (which traces ALL samples) was throttled to ~18 q/min
-                      # with the GPU idle. Full trajectories live in the standalone-eval jsonl +
-                      # traj viewer instead.
+      backend: mlflow   # re-enabled 2026-11-12 (user request): per-sample trajectory tracing -> mlflow
+                        # (matches search_r1_config_npu.yaml). NOTE: was disabled 2026-11-11 because
+                        # synchronous per-trajectory mlflow writes serialize on the sqlite write lock;
+                        # val (traces ALL 700 samples) throttled to ~18 q/min with the GPU idle. If that
+                        # recurs, lower max_samples_per_step_per_worker or move the mlflow backend off
+                        # sqlite (file store on fast disk / a real tracking server).
       token2text: true
       max_samples_per_step_per_worker: 16
     multi_turn:
