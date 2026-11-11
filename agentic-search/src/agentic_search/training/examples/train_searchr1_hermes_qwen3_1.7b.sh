@@ -105,10 +105,11 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-2}"
 
 # ---- training hyperparams ----
-# 2 cards: train_batch 16 * n=5 = 80 rollouts, mini_batch 8 * n=5 = 40 -> both
-# divisible by the 2 GPUs. Raise BATCH_SIZE only if the GPU memory allows it.
-BATCH_SIZE="${BATCH_SIZE:-16}"
-MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-8}"
+# 2 cards, batch 256: 256*n=5 = 1280 rollouts/step, mini 32*n=5 = 160 -> both
+# divisible by 2 GPUs. Actor-update memory is bounded by micro (4/gpu, fixed);
+# the 1280 generations are queued by sglang (max_num_seqs=256, ~2 replicas).
+BATCH_SIZE="${BATCH_SIZE:-256}"
+MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-32}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
@@ -119,7 +120,7 @@ LR="${LR:-1e-6}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
-VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-8}"   # val pass only: 8 * n=5 = 40 rollouts
+VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"  # val is n=1 (val_kwargs): 64 prompts per gen batch
 VAL_ONLY="${VAL_ONLY:-False}"
 # Pre-training validation is OFF by default: it costs a full validation
 # rollout pass over VAL_BATCH_SIZE before step 1, which is pure overhead when

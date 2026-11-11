@@ -31,6 +31,7 @@ trainer:
   val_only: false
   save_freq: 20
   test_freq: 20
+  max_actor_ckpt_to_keep: 1   # only the newest checkpoint survives (GRPO has no critic ckpt)
   default_local_dir: ${oc.env:SAVE_CHECKPOINT_DIR,/root/data/train_runs/searchr1_hermes_Qwen3-1.7B/ckpt}
 
 algorithm:
@@ -139,6 +140,10 @@ actor_rollout_ref:
     max_model_len: 12288   # vLLM engine cap = prompt 4096 + response 8192
     max_num_seqs: 256   # per-replica concurrent sequences (long multi-turn prompts; bounded by KV cache via gpu_memory_utilization)
     n: 5                # samples per question
+    val_kwargs:         # validation sampling: EM-standard @1 greedy, same protocol as the standalone eval
+      n: 1
+      do_sample: false
+      temperature: 0
     tensor_model_parallel_size: 1
     gpu_memory_utilization: 0.35   # actor + ref + rollout share one 24G card
     max_num_batched_tokens: 12288
