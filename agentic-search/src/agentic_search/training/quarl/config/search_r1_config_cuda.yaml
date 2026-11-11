@@ -31,7 +31,7 @@ trainer:
   val_only: false
   save_freq: 20
   test_freq: 20
-  max_actor_ckpt_to_keep: 1   # only the newest checkpoint survives (GRPO has no critic ckpt)
+  max_actor_ckpt_to_keep: 1   # only the newest checkpoint survives (GRPO has no critic ckpt); launcher overrides via CLI
   default_local_dir: ${oc.env:SAVE_CHECKPOINT_DIR,/root/data/train_runs/searchr1_hermes_Qwen3-1.7B/ckpt}
 
 algorithm:
@@ -88,7 +88,7 @@ actor_rollout_ref:
     override_config:
       attn_implementation: flash_attention_2   # flash-attn 2.8.3 built for torch 2.9.1/sm_89 (was sdpa before the wheel existed)
     custom_chat_template: ${oc.env:HERMES_JINJA,null}   # qwen3_hermes.jinja (launcher exports HERMES_JINJA)
-    path: ${oc.env:MODEL_PATH,/root/data/models/Qwen3-1.7B}
+    path: /root/data/models/Qwen3-1.7B   # launcher 用 CLI 覆盖（actor_rollout_ref.model.path="$MODEL_PATH"）
   actor:
     # Fixed-size micro batches (dynamic bsz rolled back 2026-10-29).
     # `use_dynamic_bsz=true` + `ppo_max_token_len_per_gpu=2x(4096+8192)` made

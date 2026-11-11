@@ -103,6 +103,9 @@ ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1}"   # CUDA box: 2x 4090D (
 ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1}"   # torch_npu pin (ignored on CUDA)
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-2}"
+# only the newest N actor checkpoints survive (GRPO has no critic ckpt);
+# config reads it as ${oc.env:MAX_ACTOR_CKPT_TO_KEEP,1}
+export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-1}"
 
 # ---- training hyperparams ----
 # 2 cards, batch 256: 256*n=5 = 1280 rollouts/step; mini 128*n=5 = 640 ->
@@ -150,10 +153,10 @@ PPO_MAX_TOKEN_LEN_PER_GPU=$(((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH) * 2))
 # vLLM keeps its own cap: the actor budget above is for fwd/bwd packing only;
 # feeding 2x to the engine just inflates prefill batches and KV-cache peaks.
 ROLLOUT_MAX_NUM_BATCHED_TOKENS=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))
-export ASCEND_VISIBLE_DEVICES
+# export ASCEND_VISIBLE_DEVICES
 # torch_npu (not used on this box) resolves its device ids from
 # ASCEND_RT_VISIBLE_DEVICES; the real pin here is CUDA_VISIBLE_DEVICES above.
-export ASCEND_RT_VISIBLE_DEVICES
+# export ASCEND_RT_VISIBLE_DEVICES
 
 mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
@@ -262,11 +265,7 @@ fi
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 # ---- launch training ----
 if [ "$RANK" -eq 0 ]; then
-    # All settings live in search_r1_config_cuda_1.7b.yaml: hydra CLI overrides
-    # for trainer.* / actor_rollout_ref.model.override_config.* do NOT survive
-    # the trip into the trainer on this verl build (they silently revert to the
-    # yaml defaults, i.e. the Ascend ones). The launcher therefore only exports
-    # env knobs that the config interpolates.
     "$PYTHON" -m quarl.main_rl \
-        --config-name search_r1_config_cuda_1.7b
+        --config-name search_r1_config_cuda \
+        trainer.max_actor_ckpt_to_keep="$MAX_ACTOR_CKPT_TO_KEEP"
 fi

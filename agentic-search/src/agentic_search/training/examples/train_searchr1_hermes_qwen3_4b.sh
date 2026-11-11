@@ -1,36 +1,67 @@
 #!/usr/bin/env bash
 # Search-R1 training with Qwen3-4B and Hermes JSON tool calls.
-# Uses qwen3_hermes.jinja, the Hermes parser, and vLLM on Ascend.
-# Usage: edit CONFIG below, then: bash train_searchr1_hermes_qwen3_4b.sh
+# Uses qwen3_hermes.jinja, the Hermes parser, and sglang on a 2x4090D (CUDA) box.
+# (Same layout as train_searchr1_hermes_qwen3_1.7b.sh, Qwen3-4B model.)
+#
+# The retrieval service is NOT started here -- run it once, separately:
+#   bash "$TRAINING_DIR/examples/start_retriever.sh"   # dense e5 + HNSW, CPU faiss, :8000
+#
+# Usage: bash train_searchr1_hermes_qwen3_4b_cuda.sh  [hydra CLI overrides...]
 
 set -euo pipefail
 
 # ========================== CONFIG ==========================
 
 # ---- paths ----
-REPO_ROOT="${REPO_ROOT:-/home/xuwentao/agentic-search-workspace}"
+REPO_ROOT="${REPO_ROOT:-/root/agentic-search-workspace}"
 TRAINING_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training"
 export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searchpath
 
 
 # python for training (server env; local: uv run --project agentic-search)
-PYTHON="${PYTHON:-python3}"
+# the conda base env holds hydra/verl/torch; the system python3 has no torch
+PYTHON="${PYTHON:-/root/miniconda3/bin/python3}"
+export PATH="$(dirname "$PYTHON"):$PATH"
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
+# CUDA runtime: torch 2.9.1+cu128 needs the pip-installed nvidia libs (it looks
+# up cudaGetDriverEntryPointByVersion). If the system CUDA 12.2 libcudart wins the
+# loader order, every spawned child (sglang's scheduler) dies with
+#   ImportError: libc10_cuda.so: undefined symbol: cudaGetDriverEntryPointByVersion
+# Put the pip nvidia libs FIRST in LD_LIBRARY_PATH (same trick as the eval
+# launcher, run_rollout_eval.sh).
+PYTHON_BIN_DIR="${PYTHON_BIN_DIR:-$(dirname "$PYTHON")}"
+NV_LIBS="$(ls -d "$PYTHON_BIN_DIR"/../lib/python3*/site-packages/nvidia/*/lib 2>/dev/null | tr '\n' ':')"
+if [ -n "$NV_LIBS" ]; then
+    export LD_LIBRARY_PATH="${NV_LIBS}${LD_LIBRARY_PATH:-}"
+fi
+# 4090/4090D are GeForce cards: no CUDA peer access over PCIe, so NCCL must run
+# without P2P. Without this, FSDP init dies with
+#   "Cuda failure 217 'peer access is not supported between these two devices'"
+# (eval never hits it: each sglang replica owns one card and never talks to the
+# other one, so nothing crosses the PCIe link).
+export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"   # no InfiniBand on this box
+export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-0}"   # CUDA IPC cumem vs. peer access
+export NCCL_ALGO="${NCCL_ALGO:-Ring}"           # Ring needs less P2P than Tree
+export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"         # verl's runtime_env sets WARN; ours wins
 
 # custom chat template: passed via env var (Hydra CLI overrides cannot lex the
 # jinja text); consumed in the config as ${oc.env:HERMES_JINJA}
 export HERMES_JINJA="${HERMES_JINJA:-$(cat "$TRAINING_DIR/quarl/template/qwen3_hermes.jinja")}"
 
 # ---- model / data ----
-MODEL_PATH="${MODEL_PATH:-/data/models/Qwen3-4B}"   # Qwen3-4B (native <think> + hermes JSON <tool_call> tool calling)
-DATA_PATH="${DATA_PATH:-/data/xuwentao_data/search_r1/train.parquet}"        # parquet without suffix
-TEST_DATA_PATH="${TEST_DATA_PATH:-/data/xuwentao_data/ssp/test.jsonl}"
+MODEL_PATH="${MODEL_PATH:-/root/data/models/Qwen3-4B}"   # Qwen3-4B (native <think> + hermes JSON <tool_call> tool calling)
+DATA_PATH="${DATA_PATH:-/root/data/search_r1/train.parquet}"        # parquet without suffix
+TEST_DATA_PATH="${TEST_DATA_PATH:-/root/data/ssp/test.jsonl}"
 
 # ---- output ----
-OUTPUT_ROOT="${OUTPUT_ROOT:-/tmp}"
-OUTPUT_SUBDIR="${OUTPUT_SUBDIR:-searchr1_Qwen3-4B}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/root/data/train_runs}"
+OUTPUT_SUBDIR="${OUTPUT_SUBDIR:-searchr1_hermes_Qwen3-4B}"
 OUTPUT_DIR="${OUTPUT_ROOT}/${OUTPUT_SUBDIR}/$(date +"%-m_%-d_%-H")"
 SAVE_CHECKPOINT_DIR="${OUTPUT_DIR}/ckpt"
+# read back by the config as ${oc.env:SAVE_CHECKPOINT_DIR} / ${oc.env:EXPERIMENT_NAME}
+export SAVE_CHECKPOINT_DIR
+export EXPERIMENT_NAME="searchr1_hermes_qwen3_4b_$(date +%m_%d_%H_%M)"   # mlflow run name; minute-level so restarts within an hour are distinguishable
 TENSORBOARD_LOG_DIR="${OUTPUT_DIR}/logs/tensorboard"
 
 # ---- judge service (validation scoring: search_eval_score -> llm_as_a_judge) ----
@@ -40,6 +71,8 @@ TENSORBOARD_LOG_DIR="${OUTPUT_DIR}/logs/tensorboard"
 export JUDGE_BASE_URL="${JUDGE_BASE_URL:-http://judge_host:5000/v1}"
 export JUDGE_MODEL="${JUDGE_MODEL:-judge_model_name}"
 export JUDGE_API_KEY="${JUDGE_API_KEY:-dummy_api_key}"
+# no judge service reachable here: EM misses score 0 instead of calling out
+export USE_JUDGE="${USE_JUDGE:-false}"
 
 # ---- experiment tracking (unified mlflow: metrics + traces, one UI) ----
 # metrics: trainer.logger mlflow backend; traces: rollout.trace mlflow backend
@@ -59,32 +92,42 @@ RETRIEVER_ENABLE="${RETRIEVER_ENABLE:-1}"
 RETRIEVER_SERVER="$TRAINING_DIR/examples/retrieval/retrieval_server.py"
 RETRIEVER_INDEX_PATH="/data/xuwentao_data/wiki-18-e5-index/index"
 RETRIEVER_CORPUS_PATH="/data/xuwentao_data/wiki_2018/wiki-18.jsonl"
-RETRIEVER_MODEL_PATH="/data/models/e5-base-v2/"
+RETRIEVER_MODEL_PATH="${RETRIEVER_MODEL_PATH:-/root/data/models/e5-base-v2}"
 RETRIEVER_TOPK="${RETRIEVER_TOPK:-3}"
-# Pin both visibility vars: faiss_ascend reads ASCEND_VISIBLE_DEVICES, torch_npu prefers ASCEND_RT_VISIBLE_DEVICES.
+# NPU-only note (the retriever now runs standalone on CPU, see start_retriever.sh).
 RETRIEVER_NPU_DEVICES="${RETRIEVER_NPU_DEVICES:-1}"   # single NPU for retrieval (die 1)
 export SEARCH_PORT="${SEARCH_PORT:-8000}"
 
-# ---- Ascend (8 training cards die 8-15, retriever die 1) ----
-ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-8,9,10,11,12,13,14,15}"   # 8 training cards (die 8-15)
-ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-8,9,10,11,12,13,14,15}"   # torch_npu pin, must match ASCEND_VISIBLE_DEVICES
-N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-8}"
+# ---- devices: 2x 4090D (CUDA). The ASCEND_* vars are kept only so the old
+# (now commented-out) NPU retriever block still parses; torch ignores them here. ----
+ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0,1}"   # CUDA box: 2x 4090D (die 0,1)
+ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1}"   # torch_npu pin (ignored on CUDA)
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
+N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-2}"
+# only the newest N actor checkpoints survive (GRPO has no critic ckpt)
+export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-1}"
 
 # ---- training hyperparams ----
-# 8 training cards: 256*5=1280, 128*5=640, 64*5=320 all divisible by 8.
+# 2 cards, batch 256: 256*n=5 = 1280 rollouts/step; mini 128*n=5 = 640 ->
+# 2 optimizer steps per step (256/128). Actor-update memory is bounded by
+# micro (4/gpu, fixed); the 1280 generations queue in sglang (max_num_seqs).
+# 4B bf16 ~8.2G fits one 24G card; if FSDP+micro4 does not fit, drop to
+#   bash ... actor.ppo_micro_batch_size_per_gpu=2
 BATCH_SIZE="${BATCH_SIZE:-256}"
 MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
-ROLLOUT_TP="${ROLLOUT_TP:-1}"   # TP=1 avoids cross-card TP comm
+ROLLOUT_TP="${ROLLOUT_TP:-1}"   # 4B fits one 24G card; TP=1 avoids cross-card comm
 MAX_TURNS="${MAX_TURNS:-10}"
-ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.7}"
+# 0.6 gives sglang ~14.4G KV+weights on 24G; actor+ref FSDP fits in the
+# remaining ~9.6G (micro-bounded activations).
+ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.6}"
 LR="${LR:-1e-6}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
-VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"   # 64*5=320 is divisible by 8
+VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-256}"  # val is n=1 (val_kwargs): saturate sglang like the train batch does (~10 min/val)
 VAL_ONLY="${VAL_ONLY:-False}"
 # Pre-training validation is OFF by default: it costs a full validation
 # rollout pass over VAL_BATCH_SIZE before step 1, which is pure overhead when
@@ -112,11 +155,10 @@ PPO_MAX_TOKEN_LEN_PER_GPU=$(((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH) * 2))
 # vLLM keeps its own cap: the actor budget above is for fwd/bwd packing only;
 # feeding 2x to the engine just inflates prefill batches and KV-cache peaks.
 ROLLOUT_MAX_NUM_BATCHED_TOKENS=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))
-export ASCEND_VISIBLE_DEVICES
-# torch_npu resolves its device ids from ASCEND_RT_VISIBLE_DEVICES; without it
-# the pin above is silently ignored by torch_npu (faiss_ascend only reads the
-# other one), so both must be exported.
-export ASCEND_RT_VISIBLE_DEVICES
+# export ASCEND_VISIBLE_DEVICES
+# torch_npu (not used on this box) resolves its device ids from
+# ASCEND_RT_VISIBLE_DEVICES; the real pin here is CUDA_VISIBLE_DEVICES above.
+# export ASCEND_RT_VISIBLE_DEVICES
 
 mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
@@ -125,45 +167,8 @@ mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 # NOTE(2026-11-11): the retrieval service is NOT started by this launcher any more.
 #   Start it once, separately, BEFORE training:
 #       bash "$TRAINING_DIR/examples/start_retriever.sh"   # dense e5 + HNSW, CPU faiss, :8000
-#   The old in-launcher (NPU) startup is kept below for reference but is disabled:
-#   every training run restarted the service, which reloads the ~70G index and
-#   drops the warm page cache. The agent talks to it over
-#   http://$SEARCH_IP:$SEARCH_PORT/ via quarl/tool/search_tool_fn.py.
-# # ---- retrieval service (NPU: single-card faiss) ----
-# start_retriever() {
-#     # Kill stale retriever instances (SIGKILL; SIGTERM may not die fast enough).
-#     if command -v lsof >/dev/null 2>&1; then
-#         lsof -ti:"$SEARCH_PORT" | xargs -r kill -9 2>/dev/null || true
-#     else
-#         pkill -9 -f "retrieval_server.py" 2>/dev/null || true
-#     fi
-#     # Wait until the port is actually released (max 10s).
-#     for _ in $(seq 1 10); do
-#         if command -v lsof >/dev/null 2>&1 && ! lsof -ti:"$SEARCH_PORT" >/dev/null 2>&1; then
-#             break
-#         fi
-#         sleep 1
-#     done
-#     echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to $OUTPUT_DIR/logs/retriever_rank0.log)"
-#     # Pin BOTH visibility vars (faiss_ascend reads ASCEND_VISIBLE_DEVICES,
-#     # torch_npu prefers ASCEND_RT_VISIBLE_DEVICES). Command-prefix env (no
-#     # export) so the training launch below keeps its own visibility.
-#     ASCEND_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" ASCEND_RT_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" \
-#         OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
-#         --index_path "$RETRIEVER_INDEX_PATH" \
-#         --corpus_path "$RETRIEVER_CORPUS_PATH" \
-#         --topk "$RETRIEVER_TOPK" \
-#         --retriever_name e5 \
-#         --retriever_model "$RETRIEVER_MODEL_PATH" \
-#         --cache-entries 10000 \
-#         --faiss-device npu \
-#         > "$OUTPUT_DIR/logs/retriever_rank0.log" 2>&1 &
-#     return 0
-# }
-#
-# if [ "$RANK" -eq 0 ] && [ "$RETRIEVER_ENABLE" = "1" ]; then
-#     start_retriever
-# fi
+#   The agent talks to it over http://$SEARCH_IP:$SEARCH_PORT/ via
+#   quarl/tool/search_tool_fn.py.
 
 # ---- mlflow trace db (pre-init so AgentLoopWorkers don't race the alembic migration) ----
 # mlflow creates a TrackingServiceClient (and runs alembic upgrade) in every new
@@ -176,8 +181,8 @@ mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 # ("sqlite:///tmp/mlruns.db") points at ${CWD}/tmp/mlruns.db -- a DIFFERENT
 # file, so workers would race on a fresh DB again. Export the variable so
 # every process agrees.
-export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////data/mlruns.db}"
-export MLFLOW_DB_PATH="${MLFLOW_DB_PATH:-/data/mlruns.db}"
+export MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI:-sqlite:////root/data/mlruns.db}"
+export MLFLOW_DB_PATH="${MLFLOW_DB_PATH:-/root/data/mlruns.db}"
 if [ "$RANK" -eq 0 ]; then
     mkdir -p "$(dirname "$MLFLOW_DB_PATH")"
     # Do NOT rm the DB: once migrated, every new process's TrackingServiceClient
@@ -225,45 +230,12 @@ fi
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 # ---- launch training ----
 if [ "$RANK" -eq 0 ]; then
+    # CLI 覆盖（含 trainer.*）：同时验证这个 verl build 上 CLI 覆盖是否存活
+    # （1.7b launcher 旧注释声称 trainer.* 会静默回退 yaml 默认 —— 跑一次看 ckpt
+    # 落哪：落在 SAVE_CHECKPOINT_DIR 说明 CLI 生效；落在 yaml 默认说明回退）
     "$PYTHON" -m quarl.main_rl \
-        --config-name search_r1_config \
-        actor_rollout_ref.rollout.multi_turn.format=hermes \
-        actor_rollout_ref.model.custom_chat_template='${oc.env:HERMES_JINJA,null}' \
-        data.clean_question=true \
-        data.train_files="[\"${DATA_PATH}\"]" \
-        data.val_files="[\"${TEST_DATA_PATH}\"]" \
-        data.train_batch_size="$BATCH_SIZE" \
-        data.val_batch_size="$VAL_BATCH_SIZE" \
-        data.max_prompt_length="$MAX_PROMPT_LENGTH" \
-        data.max_response_length="$MAX_RESPONSE_LENGTH" \
-        data.filter_overlong_prompts=True \
-        data.truncation='left' \
+        --config-name search_r1_config_cuda \
         actor_rollout_ref.model.path="$MODEL_PATH" \
-        actor_rollout_ref.actor.optim.lr="$LR" \
-        actor_rollout_ref.actor.use_kl_loss=True \
-        actor_rollout_ref.actor.strategy=fsdp \
-        actor_rollout_ref.actor.ppo_mini_batch_size="$MINI_BATCH_SIZE" \
-        actor_rollout_ref.actor.use_dynamic_bsz=False \
-        actor_rollout_ref.actor.ppo_max_token_len_per_gpu="$PPO_MAX_TOKEN_LEN_PER_GPU" \
-        actor_rollout_ref.actor.clip_ratio_high=0.285 \
-        actor_rollout_ref.rollout.name=vllm \
-        actor_rollout_ref.rollout.tensor_model_parallel_size="$ROLLOUT_TP" \
-        actor_rollout_ref.rollout.max_num_batched_tokens="$ROLLOUT_MAX_NUM_BATCHED_TOKENS" \
-        actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \
-        actor_rollout_ref.rollout.n="$ROLLOUT_N" \
-        actor_rollout_ref.rollout.multi_turn.max_assistant_turns="$MAX_TURNS" \
-        actor_rollout_ref.rollout.agent.num_workers=10 \
-        actor_rollout_ref.hybrid_engine=True \
-        diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_eval_score.py" \
-        trainer.project_name=searchr1_hermes \
-        trainer.experiment_name="searchr1_hermes_qwen3_4b_$(date +%m_%d_%H)" \
-        trainer.logger='["console","mlflow"]' \
-        trainer.val_before_train="$VAL_BEFORE_TRAIN" \
-        trainer.val_only="$VAL_ONLY" \
-        trainer.n_gpus_per_node="$N_GPUS_PER_NODE" \
-        trainer.nnodes="$NNODES" \
-        trainer.save_freq="$SAVE_FREQ" \
-        trainer.test_freq="$TEST_FREQ" \
-        trainer.default_local_dir="$SAVE_CHECKPOINT_DIR" \
-        trainer.total_epochs="$TOTAL_EPOCHS"
+        trainer.max_actor_ckpt_to_keep="$MAX_ACTOR_CKPT_TO_KEEP" \
+        trainer.default_local_dir="$SAVE_CHECKPOINT_DIR"
 fi

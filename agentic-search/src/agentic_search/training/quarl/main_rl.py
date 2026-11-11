@@ -32,7 +32,7 @@ def setup_logging():
 setup_logging()
 
 
-@hydra.main(config_path="config", config_name="kg_self_play_config", version_base=None)
+@hydra.main(config_path="config", config_name="search_r1_config_cuda", version_base=None)
 def main(config):
     run_ppo(config)
 
