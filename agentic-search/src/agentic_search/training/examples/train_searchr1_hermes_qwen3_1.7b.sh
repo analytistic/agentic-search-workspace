@@ -105,11 +105,11 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-2}"
 
 # ---- training hyperparams ----
-# 2 cards, batch 256: 256*n=5 = 1280 rollouts/step, mini 32*n=5 = 160 -> both
-# divisible by 2 GPUs. Actor-update memory is bounded by micro (4/gpu, fixed);
-# the 1280 generations are queued by sglang (max_num_seqs=256, ~2 replicas).
+# 2 cards, batch 256: 256*n=5 = 1280 rollouts/step; mini 128*n=5 = 640 ->
+# 2 optimizer steps per step (256/128). Actor-update memory is bounded by
+# micro (4/gpu, fixed); the 1280 generations queue in sglang (max_num_seqs).
 BATCH_SIZE="${BATCH_SIZE:-256}"
-MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-32}"
+MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
