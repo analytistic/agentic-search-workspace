@@ -55,6 +55,11 @@ export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false
 # pyserini instantiates an OpenAI client at import time and aborts without a key
 export OPENAI_API_KEY="${OPENAI_API_KEY:-dummy}"
+# Keep the e5 *encoder* on CPU too. faiss already runs on CPU, but the encoder
+# defaults to cuda:0 and would compete with sglang for the trainer's GPUs
+# during rollout, spiking /retrieve latency past the client timeout. Force CPU
+# unless explicitly overridden (CUDA_VISIBLE_DEVICES=0 ...).
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:--1}"
 
 if [[ ! -d "$RETRIEVAL_DIR" ]]; then
     echo "retrieval dir not found: $RETRIEVAL_DIR" >&2
