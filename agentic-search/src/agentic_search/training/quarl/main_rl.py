@@ -43,8 +43,17 @@ def run_ppo(config) -> None:
         # verl 0.9.0 nests ray init config under ray_kwargs.ray_init
         # (ppo_trainer.yaml); the legacy top-level ray_init no longer exists.
         num_cpus = config.get("ray_kwargs", {}).get("ray_init", {}).get("num_cpus", None)
+        runtime_env = get_ppo_ray_runtime_env()
+        # Forward NCCL_* to the ray actors explicitly. The actors do NOT
+        # reliably inherit the launcher's environment, so e.g.
+        # NCCL_P2P_DISABLE=1 (needed on GeForce cards without CUDA peer access,
+        # otherwise FSDP init dies with "Cuda failure 217 peer access is not
+        # supported between these two devices") never reached the workers.
+        nccl_env = {k: v for k, v in os.environ.items() if k.startswith("NCCL_")}
+        if nccl_env:
+            runtime_env.setdefault("env_vars", {}).update(nccl_env)
         ray.init(
-            runtime_env=get_ppo_ray_runtime_env(),
+            runtime_env=runtime_env,
             num_cpus=num_cpus,
         )
 
