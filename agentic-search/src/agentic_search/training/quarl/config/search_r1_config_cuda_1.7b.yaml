@@ -86,7 +86,7 @@ actor_rollout_ref:
   model:
     enable_gradient_checkpointing: true   # explicit (default is also True)
     override_config:
-      attn_implementation: sdpa   # no flash_attn here -> transformers ImportError; sdpa is fine for 1.7B
+      attn_implementation: flash_attention_2   # flash-attn 2.8.3 built for torch 2.9.1/sm_89 (was sdpa before the wheel existed)
     custom_chat_template: ${oc.env:HERMES_JINJA,null}   # qwen3_hermes.jinja (launcher exports HERMES_JINJA)
     path: ${oc.env:MODEL_PATH,/root/data/models/Qwen3-1.7B}
   actor:
