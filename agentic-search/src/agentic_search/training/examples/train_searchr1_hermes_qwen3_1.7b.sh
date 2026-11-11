@@ -115,7 +115,9 @@ MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
 ROLLOUT_TP="${ROLLOUT_TP:-1}"   # 1.7B fits on one 24G card; TP=1 avoids cross-card comm
 MAX_TURNS="${MAX_TURNS:-10}"
-ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.35}"
+# 0.6 gives sglang ~14.4G KV+weights on 24G; actor+ref FSDP fits in the
+# remaining ~9.6G (micro-bounded activations). Was 0.35 in the debug run.
+ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.6}"
 LR="${LR:-1e-6}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
