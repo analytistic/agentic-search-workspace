@@ -24,7 +24,7 @@ trainer:
   n_gpus_per_node: 2
   nnodes: 1
   total_epochs: 1          # verl default is 30
-  project_name: searchr1_hermes
+  project_name: hermes   # = the mlflow Experiment name
   experiment_name: ${oc.env:EXPERIMENT_NAME,searchr1_hermes_qwen3_1.7b}
   logger: ["console", "mlflow"]
   val_before_train: true    # run the val pass BEFORE step 1 -> step-0 baseline (700 questions @1 greedy)

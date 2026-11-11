@@ -60,7 +60,7 @@ OUTPUT_DIR="${OUTPUT_ROOT}/${OUTPUT_SUBDIR}/$(date +"%-m_%-d_%-H")"
 SAVE_CHECKPOINT_DIR="${OUTPUT_DIR}/ckpt"
 # read back by the config as ${oc.env:SAVE_CHECKPOINT_DIR} / ${oc.env:EXPERIMENT_NAME}
 export SAVE_CHECKPOINT_DIR
-export EXPERIMENT_NAME="searchr1_hermes_qwen3_1.7b_$(date +%m_%d_%H)"
+export EXPERIMENT_NAME="searchr1_hermes_qwen3_1.7b_$(date +%m_%d_%H_%M)"   # mlflow run name; minute-level so restarts within an hour are distinguishable
 TENSORBOARD_LOG_DIR="${OUTPUT_DIR}/logs/tensorboard"
 
 # ---- judge service (validation scoring: search_eval_score -> llm_as_a_judge) ----
