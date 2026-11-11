@@ -249,6 +249,11 @@ if [ "$RANK" -eq 0 ]; then
         data.filter_overlong_prompts=True \
         data.truncation='left' \
         actor_rollout_ref.model.path="$MODEL_PATH" \
+        # the yaml asks for flash_attention_2 (that box is Ascend/NPU and has
+        # flash_attn); this box has no flash_attn -> transformers raises
+        # ImportError while loading actor/ref. sdpa is torch-native and fine
+        # for a 1.7B model.
+        actor_rollout_ref.model.override_config.attn_implementation=sdpa \
         actor_rollout_ref.actor.optim.lr="$LR" \
         actor_rollout_ref.actor.use_kl_loss=True \
         actor_rollout_ref.actor.strategy=fsdp \
@@ -266,7 +271,7 @@ if [ "$RANK" -eq 0 ]; then
         actor_rollout_ref.hybrid_engine=True \
         diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_r1_score.py" \
         trainer.project_name=searchr1_hermes \
-        trainer.experiment_name="searchr1_hermes_qwen3_4b_$(date +%m_%d_%H)" \
+        trainer.experiment_name="searchr1_hermes_qwen3_1.7b_$(date +%m_%d_%H)" \
         trainer.logger='["console","mlflow"]' \
         trainer.val_before_train="$VAL_BEFORE_TRAIN" \
         trainer.val_only="$VAL_ONLY" \
