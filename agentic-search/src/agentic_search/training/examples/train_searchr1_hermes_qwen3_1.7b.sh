@@ -22,6 +22,17 @@ export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searc
 PYTHON="${PYTHON:-/root/miniconda3/bin/python3}"
 export PATH="$(dirname "$PYTHON"):$PATH"
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
+# CUDA runtime: torch 2.9.1+cu128 needs the pip-installed nvidia libs (it looks
+# up cudaGetDriverEntryPointByVersion). If the system CUDA 12.2 libcudart wins the
+# loader order, every spawned child (sglang's scheduler) dies with
+#   ImportError: libc10_cuda.so: undefined symbol: cudaGetDriverEntryPointByVersion
+# Put the pip nvidia libs FIRST in LD_LIBRARY_PATH (same trick as the eval
+# launcher, run_rollout_eval.sh).
+PYTHON_BIN_DIR="${PYTHON_BIN_DIR:-$(dirname "$PYTHON")}"
+NV_LIBS="$(ls -d "$PYTHON_BIN_DIR"/../lib/python3*/site-packages/nvidia/*/lib 2>/dev/null | tr '\n' ':')"
+if [ -n "$NV_LIBS" ]; then
+    export LD_LIBRARY_PATH="${NV_LIBS}${LD_LIBRARY_PATH:-}"
+fi
 # 4090/4090D are GeForce cards: no CUDA peer access over PCIe, so NCCL must run
 # without P2P. Without this, FSDP init dies with
 #   "Cuda failure 217 'peer access is not supported between these two devices'"
