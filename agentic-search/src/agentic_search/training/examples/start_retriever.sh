@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# Start the retrieval service for TRAINING rollouts (standalone process).
+#
+#   bash start_retriever.sh                # dense e5 + HNSW (CPU faiss)
+#   bash start_retriever.sh bm25           # Lucene BM25 fallback
+#   PORT=8000 bash start_retriever.sh
+#
+# WHY this exists (2026-11-11):
+#   The training launchers used to start the retriever themselves (in the
+#   launcher, next to the Ray cluster). Every training run then restarted the
+#   service, which wastes minutes on the ~70G index load and throws away the
+#   warm page cache. The retriever is now started ONCE, separately, and the
+#   training launcher only talks to it over http://$SEARCH_IP:$SEARCH_PORT/
+#   (see quarl/tool/search_tool_fn.py). The in-launcher block is commented out
+#   in every train_searchr1*.sh.
+#
+#   On the 2x4090D box the index does NOT fit next to the trainer in GPU
+#   memory, so faiss runs on CPU (--faiss-device cpu). The Ascend variant
+#   (--faiss-device npu + ASCEND_VISIBLE_DEVICES) is still available through
+#   FAISS_DEVICE below for the NPU boxes.
+#
+# Why dense needs two non-obvious flags (both learned the hard way):
+#
+# 1. --no-index-mmap
+#    faiss' IO_FLAG_MMAP reads the graph/vector blob lazily. On Lustre the
+#    mmap read of a 70G file fails outright with
+#      RuntimeError: Error in void faiss::read_xb_vector(...) at index_read.cpp:27
+#    and the server dies during startup, before uvicorn binds. Loading the
+#    whole index instead costs ~155 s and 70.5G RSS, which is fine on a 200G
+#    box, and gives 2 ms/query. Prefer it whenever RAM allows.
+#
+# 2. PREWARM=1 (default)
+#    Offsets are pread'd straight out of the 14G corpus jsonl for every hit.
+#    With the file cold on Lustre a query costs ~85 ms; once it sits in page
+#    cache it drops to ~20 ms and 128-way concurrency finishes in 1.4 s.
+#    We touch the file sequentially (dd) after the server is ready, which is
+#    cheaper than letting random reads fault it in.
+#
+# Memory budget on the 2x4090D box (200G cgroup):
+#   index 70.5G (anon) + corpus page cache 13.3G + torch/sglang ~ a few G
+#
+# NOTE: the retrieval service must be up BEFORE the training launcher starts,
+#       otherwise the first rollout calls hit a dead port and every tool call
+#       fails (the agent then answers from memory instead of searching).
+# ---------------------------------------------------------------------------
+set -uo pipefail
+
+MODE="${1:-dense}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# examples/ -> training/ -> agentic_search/ -> src/ -> agentic-search/ -> repo root
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
+RETRIEVAL_DIR="$REPO_ROOT/agentic-search/src/agentic_search/training/examples/retrieval"
+
+PYTHON_BIN_DIR="${PYTHON_BIN_DIR:-/root/miniconda3/bin}"
+DATA_ROOT="${DATA_ROOT:-/root/data}"
+INDEX_PATH="${INDEX_PATH:-$DATA_ROOT/wiki/index/hnsw64/merged_hnsw64.index}"
+BM25_INDEX_PATH="${BM25_INDEX_PATH:-$DATA_ROOT/wiki/index/bm25}"
+CORPUS_PATH="${CORPUS_PATH:-$DATA_ROOT/wiki/corpus/jsonl/wiki_dump.jsonl}"
+RETRIEVER_MODEL="${RETRIEVER_MODEL:-$DATA_ROOT/models/e5-base-v2}"
+PORT="${PORT:-8000}"
+TOPK="${TOPK:-3}"
+CACHE_ENTRIES="${CACHE_ENTRIES:-10000}"
+MAX_PROCESS_NUM="${MAX_PROCESS_NUM:-8}"
+PREWARM="${PREWARM:-1}"
+READY_TIMEOUT="${READY_TIMEOUT:-600}"
+# cpu on the 4090D box (no NPU); set FAISS_DEVICE=npu on the Ascend boxes
+FAISS_DEVICE="${FAISS_DEVICE:-cpu}"
+LOG="${LOG:-/root/retriever_${MODE}.log}"
+
+export PATH="$PYTHON_BIN_DIR:$PATH"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-16}"
+export PYTHONUNBUFFERED=1
+export TOKENIZERS_PARALLELISM=false
+# pyserini instantiates an OpenAI client at import time and aborts without a key
+export OPENAI_API_KEY="${OPENAI_API_KEY:-dummy}"
+
+if [[ ! -d "$RETRIEVAL_DIR" ]]; then
+    echo "retrieval dir not found: $RETRIEVAL_DIR" >&2
+    exit 1
+fi
+
+case "$MODE" in
+    dense)
+        [[ -f "$INDEX_PATH" ]]  || { echo "index not found: $INDEX_PATH"  >&2; exit 1; }
+        ARGS=(
+            --index_path "$INDEX_PATH"
+            --corpus_path "$CORPUS_PATH"
+            --topk "$TOPK"
+            --retriever_name e5
+            --retriever_model "$RETRIEVER_MODEL"
+            --cache-entries "$CACHE_ENTRIES"
+            --faiss-device "$FAISS_DEVICE"
+            --no-index-mmap
+            --port "$PORT"
+        )
+        ;;
+    bm25)
+        [[ -d "$BM25_INDEX_PATH" ]] || { echo "bm25 index not found: $BM25_INDEX_PATH" >&2; exit 1; }
+        # Lucene's default heap is sized from *host* memory; cap it or the JVM
+        # tries to reserve tens of GB inside the container.
+        export _JAVA_OPTIONS="${_JAVA_OPTIONS:--Xmx4g}"
+        ARGS=(
+            --index_path "$BM25_INDEX_PATH"
+            --corpus_path "$CORPUS_PATH"
+            --topk "$TOPK"
+            --retriever_name bm25
+            --cache-entries "$CACHE_ENTRIES"
+            --max-process-num "$MAX_PROCESS_NUM"
+            --port "$PORT"
+        )
+        ;;
+    *)
+        echo "usage: $0 [dense|bm25]" >&2
+        exit 2
+        ;;
+esac
+
+if curl -s -m 3 -o /dev/null "http://127.0.0.1:$PORT/status"; then
+    echo "something is already listening on :$PORT -- stop it first" >&2
+    exit 1
+fi
+
+echo "starting $MODE retriever on :$PORT (faiss=$FAISS_DEVICE, log: $LOG)"
+: > "$LOG"
+cd "$RETRIEVAL_DIR"
+setsid nohup python retrieval_server.py "${ARGS[@]}" >> "$LOG" 2>&1 < /dev/null &
+
+echo -n "waiting for /status"
+deadline=$(( SECONDS + READY_TIMEOUT ))
+while (( SECONDS < deadline )); do
+    if out=$(curl -s -m 3 "http://127.0.0.1:$PORT/status" 2>/dev/null) && [[ "$out" == *'"ready":true'* ]]; then
+        echo
+        echo "$out"
+        if [[ "$MODE" == "dense" && "$PREWARM" == "1" ]]; then
+            echo "prewarming corpus page cache ($(du -h "$CORPUS_PATH" | cut -f1))..."
+            dd if="$CORPUS_PATH" of=/dev/null bs=8M 2>&1 | tail -1
+        fi
+        exit 0
+    fi
+    echo -n "."
+    sleep 5
+done
+echo
+echo "timed out after ${READY_TIMEOUT}s -- last log lines:" >&2
+tail -20 "$LOG" >&2
+exit 1

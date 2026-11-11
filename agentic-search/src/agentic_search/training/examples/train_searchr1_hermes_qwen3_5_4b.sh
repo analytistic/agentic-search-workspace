@@ -130,41 +130,48 @@ mkdir -p "$OUTPUT_DIR/logs" "$TENSORBOARD_LOG_DIR" "$SAVE_CHECKPOINT_DIR"
 
 # tool URL is resolved from SEARCH_IP/SEARCH_PORT by quarl/tool/search_tool_fn.py
 
-# ---- retrieval service (NPU: single-card faiss) ----
-start_retriever() {
-    # Kill stale retriever instances (SIGKILL; SIGTERM may not die fast enough).
-    if command -v lsof >/dev/null 2>&1; then
-        lsof -ti:"$SEARCH_PORT" | xargs -r kill -9 2>/dev/null || true
-    else
-        pkill -9 -f "retrieval_server.py" 2>/dev/null || true
-    fi
-    # Wait until the port is actually released (max 10s).
-    for _ in $(seq 1 10); do
-        if command -v lsof >/dev/null 2>&1 && ! lsof -ti:"$SEARCH_PORT" >/dev/null 2>&1; then
-            break
-        fi
-        sleep 1
-    done
-    echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to $OUTPUT_DIR/logs/retriever_rank0.log)"
-    # Pin BOTH visibility vars (faiss_ascend reads ASCEND_VISIBLE_DEVICES,
-    # torch_npu prefers ASCEND_RT_VISIBLE_DEVICES). Command-prefix env (no
-    # export) so the training launch below keeps its own visibility.
-    ASCEND_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" ASCEND_RT_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" \
-        OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
-        --index_path "$RETRIEVER_INDEX_PATH" \
-        --corpus_path "$RETRIEVER_CORPUS_PATH" \
-        --topk "$RETRIEVER_TOPK" \
-        --retriever_name e5 \
-        --retriever_model "$RETRIEVER_MODEL_PATH" \
-        --cache-entries 10000 \
-        --faiss-device npu \
-        > "$OUTPUT_DIR/logs/retriever_rank0.log" 2>&1 &
-    return 0
-}
-
-if [ "$RANK" -eq 0 ] && [ "$RETRIEVER_ENABLE" = "1" ]; then
-    start_retriever
-fi
+# NOTE(2026-11-11): the retrieval service is NOT started by this launcher any more.
+#   Start it once, separately, BEFORE training:
+#       bash "$TRAINING_DIR/examples/start_retriever.sh"   # dense e5 + HNSW, CPU faiss, :8000
+#   The old in-launcher (NPU) startup is kept below for reference but is disabled:
+#   every training run restarted the service, which reloads the ~70G index and
+#   drops the warm page cache. The agent talks to it over
+#   http://$SEARCH_IP:$SEARCH_PORT/ via quarl/tool/search_tool_fn.py.
+# # ---- retrieval service (NPU: single-card faiss) ----
+# start_retriever() {
+#     # Kill stale retriever instances (SIGKILL; SIGTERM may not die fast enough).
+#     if command -v lsof >/dev/null 2>&1; then
+#         lsof -ti:"$SEARCH_PORT" | xargs -r kill -9 2>/dev/null || true
+#     else
+#         pkill -9 -f "retrieval_server.py" 2>/dev/null || true
+#     fi
+#     # Wait until the port is actually released (max 10s).
+#     for _ in $(seq 1 10); do
+#         if command -v lsof >/dev/null 2>&1 && ! lsof -ti:"$SEARCH_PORT" >/dev/null 2>&1; then
+#             break
+#         fi
+#         sleep 1
+#     done
+#     echo "==> starting retrieval service (npu mode on $RETRIEVER_NPU_DEVICES, logs to $OUTPUT_DIR/logs/retriever_rank0.log)"
+#     # Pin BOTH visibility vars (faiss_ascend reads ASCEND_VISIBLE_DEVICES,
+#     # torch_npu prefers ASCEND_RT_VISIBLE_DEVICES). Command-prefix env (no
+#     # export) so the training launch below keeps its own visibility.
+#     ASCEND_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" ASCEND_RT_VISIBLE_DEVICES="${RETRIEVER_NPU_DEVICES}" \
+#         OMP_NUM_THREADS="${OMP_NUM_THREADS:-$(nproc)}" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false "$PYTHON" "$RETRIEVER_SERVER" \
+#         --index_path "$RETRIEVER_INDEX_PATH" \
+#         --corpus_path "$RETRIEVER_CORPUS_PATH" \
+#         --topk "$RETRIEVER_TOPK" \
+#         --retriever_name e5 \
+#         --retriever_model "$RETRIEVER_MODEL_PATH" \
+#         --cache-entries 10000 \
+#         --faiss-device npu \
+#         > "$OUTPUT_DIR/logs/retriever_rank0.log" 2>&1 &
+#     return 0
+# }
+#
+# if [ "$RANK" -eq 0 ] && [ "$RETRIEVER_ENABLE" = "1" ]; then
+#     start_retriever
+# fi
 
 # ---- mlflow trace db (pre-init so AgentLoopWorkers don't race the alembic migration) ----
 # mlflow creates a TrackingServiceClient (and runs alembic upgrade) in every new
