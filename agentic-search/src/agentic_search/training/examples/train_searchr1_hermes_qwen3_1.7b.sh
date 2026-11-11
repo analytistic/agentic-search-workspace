@@ -122,7 +122,7 @@ LR="${LR:-1e-6}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
-VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-64}"  # val is n=1 (val_kwargs): 64 prompts per gen batch
+VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-256}"  # val is n=1 (val_kwargs): saturate sglang like the train batch does (~10 min/val)
 VAL_ONLY="${VAL_ONLY:-False}"
 # Pre-training validation is OFF by default: it costs a full validation
 # rollout pass over VAL_BATCH_SIZE before step 1, which is pure overhead when
