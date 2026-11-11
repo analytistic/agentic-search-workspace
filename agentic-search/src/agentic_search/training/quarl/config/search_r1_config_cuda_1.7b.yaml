@@ -1,91 +1,174 @@
-# CUDA single-box variant of search_r1_config (Qwen3-1.7B, hermes protocol).
+# CUDA single-box variant of search_r1_config.yaml (Qwen3-1.7B, hermes protocol).
 #
-# WHY this file exists (2026-11-11):
-#   search_r1_config.yaml is written for the Ascend/NPU box (8 cards, device=npu,
-#   flash_attention_2, vllm rollout). On the 2x4090D (CUDA) box those defaults do
-#   not apply, and -- importantly -- hydra CLI overrides for `trainer.*` and
-#   `actor_rollout_ref.model.override_config.*` do NOT reach the trainer: the
-#   driver-side config has them, but the config that lands in the trainer has the
-#   yaml defaults again (observed: trainer.n_gpus_per_node back to 8, device back
-#   to npu, attn_implementation back to flash_attention_2 -> ImportError,
-#   "Total available GPUs 2.0 is less than total desired GPUs 8").
-#   `data.*` overrides DO survive, but to keep one single source of truth we
-#   move every setting of this launcher into the config instead of the CLI.
+# WHY a separate file (2026-11-11):
+#   the original targets the Ascend/NPU box (8 cards, device=npu,
+#   flash_attention_2, vllm rollout). On the 2x4090D (CUDA) box those are wrong,
+#   and hydra CLI overrides for trainer.* / model.override_config.* do NOT reach
+#   the trainer on this verl build (the driver config has them, the trainer gets
+#   the yaml defaults back -> 'Total available GPUs 2.0 is less than total desired
+#   GPUs 8' and a flash_attn ImportError). So the settings live in the config.
+#   The launcher still owns the knobs: everything below reads ${oc.env:...}.
 #
-#   Values still honour the launcher's env exports (MODEL_PATH, DATA_PATH, ...),
-#   so `train_searchr1_hermes_qwen3_1.7b.sh` stays the single knob surface.
-#
-# Usage:
-#   bash train_searchr1_hermes_qwen3_1.7b.sh
-
+# Usage: bash train_searchr1_hermes_qwen3_1.7b.sh
 hydra:
   searchpath:
     - file://${oc.env:WORKSPACE,./}/verl/verl/trainer/config
 
+
 defaults:
-  - search_r1_config
+  - ppo_trainer
   - _self_
 
 trainer:
-  device: cuda                 # search_r1_config sets npu (Ascend)
-  n_gpus_per_node: 2           # 2x 4090D
+  device: cuda             # CUDA box: 2x 4090D (the NPU original said npu)
+  n_gpus_per_node: 2
   nnodes: 1
-  total_epochs: 1              # verl default is 30
+  total_epochs: 1          # verl default is 30
   project_name: searchr1_hermes
   experiment_name: ${oc.env:EXPERIMENT_NAME,searchr1_hermes_qwen3_1.7b}
   logger: ["console", "mlflow"]
-  val_before_train: false       # debugging run: no validation pass before step 1
+  val_before_train: false   # debugging run: no validation pass before step 1
   val_only: false
   save_freq: 20
   test_freq: 20
   default_local_dir: ${oc.env:SAVE_CHECKPOINT_DIR,/root/data/train_runs/searchr1_hermes_Qwen3-1.7B/ckpt}
 
-actor_rollout_ref:
-  model:
-    path: ${oc.env:MODEL_PATH,/root/data/models/Qwen3-1.7B}
-    custom_chat_template: ${oc.env:HERMES_JINJA,null}
-    override_config:
-      # no flash_attn on this box -> transformers raises ImportError while
-      # loading actor/ref. sdpa is torch-native and fine for a 1.7B model.
-      attn_implementation: sdpa
-  actor:
-    optim:
-      lr: 1e-6
-    use_kl_loss: true           # keeps a ref policy around (more GPU memory)
-    strategy: fsdp
-    ppo_mini_batch_size: 8     # 8 * n=5 = 40 rollouts per mini batch / 2 GPUs
-    use_dynamic_bsz: false      # fixed micro batches in the yaml
-    ppo_max_token_len_per_gpu: 24576
-    clip_ratio_high: 0.285
-  rollout:
-    name: sglang               # vllm is not installed here
-    n: 5
-    tensor_model_parallel_size: 1
-    gpu_memory_utilization: 0.35   # actor + ref + rollout share a 24G card
-    max_num_batched_tokens: 12288
-    agent:
-      num_workers: 2
-    multi_turn:
-      format: hermes
-      max_assistant_turns: 10
+algorithm:
+  name: search_r1
+  adv_estimator: grpo
+
+# verl 0.9.0 reward stack: config.reward drives RewardLoopManager.
+# The EM scorer below follows the RawRewardFn convention
+# (compute_score(data_source=..., solution_str=..., ground_truth=...)).
+reward:
+  num_workers: 8
+  custom_reward_function:
+    path: ${oc.env:WORKSPACE}/quarl/reward/score/search_r1_score.py
+    name: compute_score
+    reward_kwargs:
+      format_check: qwen3   # hermes 协议（qwen3_hermes.jinja）；qwen3_5 / search_r1 可选
+      use_judge: ${oc.env:USE_JUDGE,false}   # no judge service reachable from this box
+  reward_manager:
+    source: importlib
+    name: SearchR1RewardManager
+    module:
+      path: ${oc.env:WORKSPACE}/quarl/reward/manager/search_r1_reward_manager.py
+      name: custom_reward_manager
+  reward_model:
+    enable: false
+
+# Search-R1 trainer reads retriever.url for its batch_search calls
+# (launch script overrides url with the real SEARCH_IP).
+retriever:
+  url: "http://localhost:8000/retrieve"
+  topk: 3
+
 
 data:
+  max_start_length: 4096
   train_files: ["${oc.env:DATA_PATH,/root/data/search_r1/train.parquet}"]
   val_files: ["${oc.env:TEST_DATA_PATH,/root/data/ssp/test.jsonl}"]
-  train_batch_size: 16         # 16 * n=5 = 80 rollouts per step, 2 GPUs
+  train_batch_size: 16     # 16 * n=5 = 80 rollouts per step, 2 GPUs
   val_batch_size: 8
   max_prompt_length: 4096
   max_response_length: 8192
   filter_overlong_prompts: true
   truncation: left
-  clean_question: true
+  dataloader_num_workers: 4
+  filter_overlong_prompts_workers: 8   # num_proc for the overlong-prompt filter (RLHFDataset.maybe_filter_out_long_prompts)
+  max_samples_per_source: 100   # val only: at most N samples per data_source (0 = keep all; stratified subsample, cached as <stem>_sub<N>.parquet)
+  clean_question: true    # hermes launchers flip to true: strip Search-R1 long instructions / system messages from prompts (qwen*_hermes.jinja supplies a unified system prompt)
+  apply_chat_template_kwargs:
+    enable_thinking: true   # thinking on (auto <think> start on qwen3.x templates; no-op for the Qwen2.5 search template)
 
-reward:
-  custom_reward_function:
-    reward_kwargs:
-      format_check: qwen3
-      use_judge: false          # no judge service reachable from this box
+actor_rollout_ref:
+  model:
+    enable_gradient_checkpointing: true   # explicit (default is also True)
+    override_config:
+      attn_implementation: sdpa   # no flash_attn here -> transformers ImportError; sdpa is fine for 1.7B
+    custom_chat_template: ${oc.env:HERMES_JINJA,null}   # qwen3_hermes.jinja (launcher exports HERMES_JINJA)
+    path: ${oc.env:MODEL_PATH,/root/data/models/Qwen3-1.7B}
+  actor:
+    # Fixed-size micro batches (dynamic bsz rolled back 2026-10-29).
+    # `use_dynamic_bsz=true` + `ppo_max_token_len_per_gpu=2x(4096+8192)` made
+    # compute_log_prob die on Ascend with ACL 507035 (device-side "vector core
+    # exception" -- a kernel crash, not a host OOM). Two suspects on that path:
+    #   1) `rearrange_micro_batches` derives the micro-batch *count* from the
+    #      token budget but packs their *contents* by sum(seqlen^2), so a
+    #      micro-batch's token count is NOT bounded by the budget
+    #      (verl/workers/engine/fsdp/transformer_impl.py:648 says so explicitly);
+    #   2) log-prob materialises the full logits tensor (total_nnz x vocab,
+    #      transformer_impl.py:1348) -- 24576 tokens is ~7.5GB in bf16, doubled
+    #      again by the log_softmax output because flash_attn cross-entropy is
+    #      unavailable here.
+    # Dynamic bsz is still the right answer for throughput; re-enable it only
+    # after the crash is ruled out, and start from a 1x token budget, not 2x.
+    use_dynamic_bsz: false
+    ppo_micro_batch_size_per_gpu: 4   # per-GPU SAMPLES; only read when use_dynamic_bsz=false
+    ppo_mini_batch_size: 8     # 8 * n=5 = 40 rollouts per mini batch, over 2 GPUs
+    use_kl_loss: true          # keeps a ref policy (extra GPU memory)
+    optim:
+      lr: 1e-6
+    clip_ratio_high: 0.285
+    fsdp_config:
+      model_dtype: bfloat16   # flash_attention_2 requires bf16/fp16; verl's fp32 default crashes
+      # fsdp_size = size of ONE FSDP shard group, not the number of groups.
+      # -1 (default) -> 1D mesh (8,), FULL_SHARD/ZeRO-3: all 8 NPUs form a single
+      # FSDP group. 0 < fsdp_size < 8 -> 2D mesh (8//fsdp_size, fsdp_size) and
+      # HYBRID_SHARD (HSDP): the SECOND dim is the FSDP group, the first is DDP.
+      # Kept at -1 on purpose: in verl 0.9.0 the dispatch layer still splits data
+      # by world_size (FSDPEngine.get_data_parallel_rank() returns the global
+      # rank, get_data_parallel_group() returns WORLD), so with HSDP the "ddp"
+      # mesh dim never matches the real data-parallel dim and ranks inside one
+      # FSDP group would get different samples. The "ddp" dim is only consumed
+      # by create_device_mesh and the model merger, never by the train path.
+      fsdp_size: -1
+  ref:
+    # Fixed micro batch while dynamic bsz is off. Forward-only (no activations
+    # kept). Restored to 2 on 2026-10-29: this stage barely costs time, so the
+    # larger batch is preferred (fewer forward calls). Watch the full-logits
+    # memory peak here (vocab 152064) if it ever needs to go back down.
+    log_prob_micro_batch_size_per_gpu: 2
+    fsdp_config:
+      model_dtype: bfloat16
+      fsdp_size: -1   # mirror actor: one FSDP group over all 8 NPUs (see actor.fsdp_config)
+  rollout:
+    name: sglang            # vllm is not installed on this box
+    prompt_length: 4096    # per-sample prompt cap (must match launcher data.max_prompt_length)
+    response_length: 8192  # per-sample generation cap, multi-turn total (must match launcher data.max_response_length)
+    max_model_len: 12288   # vLLM engine cap = prompt 4096 + response 8192
+    max_num_seqs: 256   # per-replica concurrent sequences (long multi-turn prompts; bounded by KV cache via gpu_memory_utilization)
+    n: 5                # samples per question
+    tensor_model_parallel_size: 1
+    gpu_memory_utilization: 0.35   # actor + ref + rollout share one 24G card
+    max_num_batched_tokens: 12288
+    log_prob_micro_batch_size_per_gpu: 2   # forward-only; restored to 2 on 2026-10-29 (low time cost, fewer forward calls)
+    trace:
+      backend: mlflow   # per-sample trajectory tracing; view with: MLFLOW_TRACKING_URI=sqlite:///tmp/mlruns.db mlflow ui
+      token2text: true  # decode tokens to text in traces
+      max_samples_per_step_per_worker: 16   # cap trace volume per worker per step
+    multi_turn:
+      max_assistant_turns: 10 # maximum assistant turns
+      max_parallel_calls: 3   # multiple <search> blocks per round (one query each) execute in parallel
+      max_tool_response_length: 8192   # cap tool-result characters at the whole generation window (== response_length): no eager truncation (SSP-style), the multi-turn total-length check guards the window
+      tool_response_truncate_side: right   # keep the head (top-k ranked docs) when truncating
+      format: hermes   # JSON <tool_call> tool calling (qwen3_hermes.jinja)
+      enable: true # enable multi-turn rollout
+      use_inference_chat_template: false # use inference chat template
+      tokenization_sanity_check_mode: disable # disable tokenization sanity check
+      function_tool_path: ${oc.env:WORKSPACE}/quarl/tool/search_tool_fn.py
+    agent:
+      default_agent_loop: tool_agent   # verl stock ToolAgentLoop (JSON tool calling, search = only tool)
+      agent_loop_config_path: null
+      num_workers: 2
+
+
 
 diff_val_reward_fn_config:
+  reward_model:
+    reward_manager: naive_with_prompt
+  data:
+    reward_fn_key: data_source
   custom_reward_function:
-    path: ${oc.env:WORKSPACE}/quarl/reward/score/search_r1_score.py
+    path: ${oc.env:WORKSPACE}/quarl/reward/score/search_r1_score.py   # search_eval_score.py does not exist
+    name: compute_score
