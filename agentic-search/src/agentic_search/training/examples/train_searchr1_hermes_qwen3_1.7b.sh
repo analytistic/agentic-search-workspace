@@ -22,6 +22,13 @@ export WORKSPACE="$TRAINING_DIR"     # used by search_r1_config.yaml hydra searc
 PYTHON="${PYTHON:-/root/miniconda3/bin/python3}"
 export PATH="$(dirname "$PYTHON"):$PATH"
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
+# 4090/4090D are GeForce cards: no CUDA peer access over PCIe, so NCCL must run
+# without P2P. Without this, FSDP init dies with
+#   "Cuda failure 217 'peer access is not supported between these two devices'"
+# (eval never hits it: each sglang replica owns one card and never talks to the
+# other one, so nothing crosses the PCIe link).
+export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"   # no InfiniBand on this box
 
 # custom chat template: passed via env var (Hydra CLI overrides cannot lex the
 # jinja text); consumed in the config as ${oc.env:HERMES_JINJA}
