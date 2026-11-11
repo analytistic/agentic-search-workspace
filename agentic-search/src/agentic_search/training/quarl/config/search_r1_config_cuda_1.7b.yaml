@@ -27,7 +27,7 @@ trainer:
   project_name: searchr1_hermes
   experiment_name: ${oc.env:EXPERIMENT_NAME,searchr1_hermes_qwen3_1.7b}
   logger: ["console", "mlflow"]
-  val_before_train: false   # debugging run: no validation pass before step 1
+  val_before_train: true    # run the val pass BEFORE step 1 -> step-0 baseline (700 questions @1 greedy)
   val_only: false
   save_freq: 20
   test_freq: 20
