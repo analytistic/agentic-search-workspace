@@ -149,9 +149,12 @@ actor_rollout_ref:
     max_num_batched_tokens: 12288
     log_prob_micro_batch_size_per_gpu: 2   # forward-only; restored to 2 on 2026-10-29 (low time cost, fewer forward calls)
     trace:
-      backend: mlflow   # per-sample trajectory tracing; view with: MLFLOW_TRACKING_URI=sqlite:///tmp/mlruns.db mlflow ui
-      token2text: true  # decode tokens to text in traces
-      max_samples_per_step_per_worker: 16   # cap trace volume per worker per step
+      backend: null   # disabled 2026-11-11: synchronous per-trajectory mlflow writes serialize on the
+                      # sqlite write lock; val (which traces ALL samples) was throttled to ~18 q/min
+                      # with the GPU idle. Full trajectories live in the standalone-eval jsonl +
+                      # traj viewer instead.
+      token2text: true
+      max_samples_per_step_per_worker: 16
     multi_turn:
       max_assistant_turns: 10 # maximum assistant turns
       max_parallel_calls: 3   # multiple <search> blocks per round (one query each) execute in parallel
