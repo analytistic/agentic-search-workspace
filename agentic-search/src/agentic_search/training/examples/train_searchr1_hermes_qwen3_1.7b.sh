@@ -37,6 +37,9 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-/root/data/train_runs}"
 OUTPUT_SUBDIR="${OUTPUT_SUBDIR:-searchr1_hermes_Qwen3-1.7B}"
 OUTPUT_DIR="${OUTPUT_ROOT}/${OUTPUT_SUBDIR}/$(date +"%-m_%-d_%-H")"
 SAVE_CHECKPOINT_DIR="${OUTPUT_DIR}/ckpt"
+# read back by the config as ${oc.env:SAVE_CHECKPOINT_DIR} / ${oc.env:EXPERIMENT_NAME}
+export SAVE_CHECKPOINT_DIR
+export EXPERIMENT_NAME="searchr1_hermes_qwen3_1.7b_$(date +%m_%d_%H)"
 TENSORBOARD_LOG_DIR="${OUTPUT_DIR}/logs/tensorboard"
 
 # ---- judge service (validation scoring: search_eval_score -> llm_as_a_judge) ----
@@ -235,50 +238,11 @@ fi
 export PYTHONPATH="$TRAINING_DIR:$TRAINING_DIR/verl:${PYTHONPATH:-}"
 # ---- launch training ----
 if [ "$RANK" -eq 0 ]; then
+    # All settings live in search_r1_config_cuda_1.7b.yaml: hydra CLI overrides
+    # for trainer.* / actor_rollout_ref.model.override_config.* do NOT survive
+    # the trip into the trainer on this verl build (they silently revert to the
+    # yaml defaults, i.e. the Ascend ones). The launcher therefore only exports
+    # env knobs that the config interpolates.
     "$PYTHON" -m quarl.main_rl \
-        --config-name search_r1_config \
-        actor_rollout_ref.rollout.multi_turn.format=hermes \
-        actor_rollout_ref.model.custom_chat_template='${oc.env:HERMES_JINJA,null}' \
-        data.clean_question=true \
-        data.train_files="[\"${DATA_PATH}\"]" \
-        data.val_files="[\"${TEST_DATA_PATH}\"]" \
-        data.train_batch_size="$BATCH_SIZE" \
-        data.val_batch_size="$VAL_BATCH_SIZE" \
-        data.max_prompt_length="$MAX_PROMPT_LENGTH" \
-        data.max_response_length="$MAX_RESPONSE_LENGTH" \
-        data.filter_overlong_prompts=True \
-        data.truncation='left' \
-        actor_rollout_ref.model.path="$MODEL_PATH" \
-        # the yaml asks for flash_attention_2 (that box is Ascend/NPU and has
-        # flash_attn); this box has no flash_attn -> transformers raises
-        # ImportError while loading actor/ref. sdpa is torch-native and fine
-        # for a 1.7B model.
-        actor_rollout_ref.model.override_config.attn_implementation=sdpa \
-        actor_rollout_ref.actor.optim.lr="$LR" \
-        actor_rollout_ref.actor.use_kl_loss=True \
-        actor_rollout_ref.actor.strategy=fsdp \
-        actor_rollout_ref.actor.ppo_mini_batch_size="$MINI_BATCH_SIZE" \
-        actor_rollout_ref.actor.use_dynamic_bsz=False \
-        actor_rollout_ref.actor.ppo_max_token_len_per_gpu="$PPO_MAX_TOKEN_LEN_PER_GPU" \
-        actor_rollout_ref.actor.clip_ratio_high=0.285 \
-        actor_rollout_ref.rollout.name=sglang \
-        actor_rollout_ref.rollout.tensor_model_parallel_size="$ROLLOUT_TP" \
-        actor_rollout_ref.rollout.max_num_batched_tokens="$ROLLOUT_MAX_NUM_BATCHED_TOKENS" \
-        actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \
-        actor_rollout_ref.rollout.n="$ROLLOUT_N" \
-        actor_rollout_ref.rollout.multi_turn.max_assistant_turns="$MAX_TURNS" \
-        actor_rollout_ref.rollout.agent.num_workers=2 \
-        actor_rollout_ref.hybrid_engine=True \
-        diff_val_reward_fn_config.custom_reward_function.path="$TRAINING_DIR/quarl/reward/score/search_r1_score.py" \
-        trainer.project_name=searchr1_hermes \
-        trainer.experiment_name="searchr1_hermes_qwen3_1.7b_$(date +%m_%d_%H)" \
-        trainer.logger='["console","mlflow"]' \
-        trainer.val_before_train="$VAL_BEFORE_TRAIN" \
-        trainer.val_only="$VAL_ONLY" \
-        trainer.n_gpus_per_node="$N_GPUS_PER_NODE" \
-        trainer.nnodes="$NNODES" \
-        trainer.save_freq="$SAVE_FREQ" \
-        trainer.test_freq="$TEST_FREQ" \
-        trainer.default_local_dir="$SAVE_CHECKPOINT_DIR" \
-        trainer.total_epochs="$TOTAL_EPOCHS"
+        --config-name search_r1_config_cuda_1.7b
 fi

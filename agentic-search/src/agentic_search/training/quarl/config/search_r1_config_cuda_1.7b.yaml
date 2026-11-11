@@ -1,0 +1,91 @@
+# CUDA single-box variant of search_r1_config (Qwen3-1.7B, hermes protocol).
+#
+# WHY this file exists (2026-11-11):
+#   search_r1_config.yaml is written for the Ascend/NPU box (8 cards, device=npu,
+#   flash_attention_2, vllm rollout). On the 2x4090D (CUDA) box those defaults do
+#   not apply, and -- importantly -- hydra CLI overrides for `trainer.*` and
+#   `actor_rollout_ref.model.override_config.*` do NOT reach the trainer: the
+#   driver-side config has them, but the config that lands in the trainer has the
+#   yaml defaults again (observed: trainer.n_gpus_per_node back to 8, device back
+#   to npu, attn_implementation back to flash_attention_2 -> ImportError,
+#   "Total available GPUs 2.0 is less than total desired GPUs 8").
+#   `data.*` overrides DO survive, but to keep one single source of truth we
+#   move every setting of this launcher into the config instead of the CLI.
+#
+#   Values still honour the launcher's env exports (MODEL_PATH, DATA_PATH, ...),
+#   so `train_searchr1_hermes_qwen3_1.7b.sh` stays the single knob surface.
+#
+# Usage:
+#   bash train_searchr1_hermes_qwen3_1.7b.sh
+
+hydra:
+  searchpath:
+    - file://${oc.env:WORKSPACE,./}/verl/verl/trainer/config
+
+defaults:
+  - search_r1_config
+  - _self_
+
+trainer:
+  device: cuda                 # search_r1_config sets npu (Ascend)
+  n_gpus_per_node: 2           # 2x 4090D
+  nnodes: 1
+  total_epochs: 1              # verl default is 30
+  project_name: searchr1_hermes
+  experiment_name: ${oc.env:EXPERIMENT_NAME,searchr1_hermes_qwen3_1.7b}
+  logger: ["console", "mlflow"]
+  val_before_train: false       # debugging run: no validation pass before step 1
+  val_only: false
+  save_freq: 20
+  test_freq: 20
+  default_local_dir: ${oc.env:SAVE_CHECKPOINT_DIR,/root/data/train_runs/searchr1_hermes_Qwen3-1.7B/ckpt}
+
+actor_rollout_ref:
+  model:
+    path: ${oc.env:MODEL_PATH,/root/data/models/Qwen3-1.7B}
+    custom_chat_template: ${oc.env:HERMES_JINJA,null}
+    override_config:
+      # no flash_attn on this box -> transformers raises ImportError while
+      # loading actor/ref. sdpa is torch-native and fine for a 1.7B model.
+      attn_implementation: sdpa
+  actor:
+    optim:
+      lr: 1e-6
+    use_kl_loss: true           # keeps a ref policy around (more GPU memory)
+    strategy: fsdp
+    ppo_mini_batch_size: 8     # 8 * n=5 = 40 rollouts per mini batch / 2 GPUs
+    use_dynamic_bsz: false      # fixed micro batches in the yaml
+    ppo_max_token_len_per_gpu: 24576
+    clip_ratio_high: 0.285
+  rollout:
+    name: sglang               # vllm is not installed here
+    n: 5
+    tensor_model_parallel_size: 1
+    gpu_memory_utilization: 0.35   # actor + ref + rollout share a 24G card
+    max_num_batched_tokens: 12288
+    agent:
+      num_workers: 2
+    multi_turn:
+      format: hermes
+      max_assistant_turns: 10
+
+data:
+  train_files: ["${oc.env:DATA_PATH,/root/data/search_r1/train.parquet}"]
+  val_files: ["${oc.env:TEST_DATA_PATH,/root/data/ssp/test.jsonl}"]
+  train_batch_size: 16         # 16 * n=5 = 80 rollouts per step, 2 GPUs
+  val_batch_size: 8
+  max_prompt_length: 4096
+  max_response_length: 8192
+  filter_overlong_prompts: true
+  truncation: left
+  clean_question: true
+
+reward:
+  custom_reward_function:
+    reward_kwargs:
+      format_check: qwen3
+      use_judge: false          # no judge service reachable from this box
+
+diff_val_reward_fn_config:
+  custom_reward_function:
+    path: ${oc.env:WORKSPACE}/quarl/reward/score/search_r1_score.py
