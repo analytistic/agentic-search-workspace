@@ -105,7 +105,7 @@ actor_rollout_ref:
     # Dynamic bsz is still the right answer for throughput; re-enable it only
     # after the crash is ruled out, and start from a 1x token budget, not 2x.
     use_dynamic_bsz: false
-    ppo_micro_batch_size_per_gpu: 4   # per-GPU SAMPLES; only read when use_dynamic_bsz=false
+    ppo_micro_batch_size_per_gpu: 8   # per-GPU SAMPLES; only read when use_dynamic_bsz=false. bumped 4->8 2026-11-12 (A800 80G headroom)
     ppo_mini_batch_size: 8     # 8 * n=5 = 40 rollouts per mini batch, over 2 GPUs
     use_kl_loss: true          # keeps a ref policy (extra GPU memory)
     optim:
