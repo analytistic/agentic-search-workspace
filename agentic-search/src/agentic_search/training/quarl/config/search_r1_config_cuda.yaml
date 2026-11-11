@@ -147,7 +147,7 @@ actor_rollout_ref:
     tensor_model_parallel_size: 1
     gpu_memory_utilization: 0.35   # actor + ref + rollout share one 24G card
     max_num_batched_tokens: 12288
-    log_prob_micro_batch_size_per_gpu: 2   # forward-only; restored to 2 on 2026-10-29 (low time cost, fewer forward calls)
+    log_prob_micro_batch_size_per_gpu: 4   # forward-only; bumped 2->4 2026-11-12 (old_log_prob fwd, fewer calls)
     trace:
       backend: null   # disabled 2026-11-11: synchronous per-trajectory mlflow writes serialize on the
                       # sqlite write lock; val (which traces ALL samples) was throttled to ~18 q/min
