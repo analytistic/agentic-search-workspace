@@ -129,7 +129,7 @@ actor_rollout_ref:
     # kept). Restored to 2 on 2026-10-29: this stage barely costs time, so the
     # larger batch is preferred (fewer forward calls). Watch the full-logits
     # memory peak here (vocab 152064) if it ever needs to go back down.
-    log_prob_micro_batch_size_per_gpu: 2
+    log_prob_micro_batch_size_per_gpu: 4   # bumped 2->4 2026-11-12 (ref fwd-only, fewer calls)
     fsdp_config:
       model_dtype: bfloat16
       fsdp_size: -1   # mirror actor: one FSDP group over all 8 NPUs (see actor.fsdp_config)
@@ -168,7 +168,7 @@ actor_rollout_ref:
     agent:
       default_agent_loop: tool_agent   # verl stock ToolAgentLoop (JSON tool calling, search = only tool)
       agent_loop_config_path: null
-      num_workers: 4   # agent-loop orchestration workers (asyncio pools; NOT GPUs). Was 2.
+      num_workers: 8   # agent-loop orchestration workers (asyncio pools; NOT GPUs). Was 2; bumped 4->8 2026-11-12 to parallelize rollout tool-calling/retrieve.
 
 
 
