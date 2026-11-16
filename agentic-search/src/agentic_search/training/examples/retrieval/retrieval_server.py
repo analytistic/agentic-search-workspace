@@ -25,6 +25,7 @@
 #      metrics, readiness-aware /status and configurable host/port/encoder.
 
 import argparse
+import asyncio
 import collections
 import json
 import logging
@@ -74,7 +75,15 @@ def _read_index_mmap(path):
 
 
 def _device() -> str:
-    """Return the best available device: npu > cuda > mps > cpu."""
+    """Return the best available device: npu > cuda > mps > cpu.
+
+    ``RETRIEVER_DEVICE`` overrides the auto-detection (e.g. ``cpu`` on a Mac
+    to sidestep the MPS concurrent-forward deadlock, or ``npu`` to pin a
+    specific backend).
+    """
+    forced = os.environ.get("RETRIEVER_DEVICE")
+    if forced:
+        return forced
     try:
         import torch_npu  # noqa: F401
 
@@ -249,16 +258,10 @@ class Encoder:
         # torch_npu in this process; falls back to cuda/mps/cpu otherwise).
         p = next(self.model.parameters())
         logger.info("[load] encoder model on %s, dtype %s (device()=%s)", p.device, p.dtype, _device())
-        # Serialize encodes: concurrent requests would otherwise split the
-        # OpenMP thread pool across processes-in-flight and each encode runs
-        # at a fraction of the machine's speed. One batch at a time uses all
-        # cores; faiss search stays outside the lock and still overlaps.
-        self._lock = threading.Lock()
 
     @torch.no_grad()
     def encode(self, query_list: List[str], is_query=True) -> np.ndarray:
-        with self._lock:
-            return self._encode_locked(query_list, is_query)
+        return self._encode_locked(query_list, is_query)
 
     def _encode_locked(self, query_list: List[str], is_query=True) -> np.ndarray:
         if isinstance(query_list, str):
@@ -586,18 +589,12 @@ class DenseRetriever(BaseRetriever):
         self.topk = config.retrieval_topk
         self.batch_size = config.retrieval_batch_size
         self.ntotal = self.index.ntotal if hasattr(self.index, "ntotal") else None
-        # faiss NPU's StandardNpuResources requires temp memory to be freed in
-        # LIFO order; concurrent index.search calls interleave alloc/free and
-        # trip the NpuMemoryReservation destructor assert, crashing the whole
-        # process. Serialize search with a lock (same pattern as the encoder).
-        self._search_lock = threading.Lock()
 
     def _search(self, query: str, num: int = None, return_score: bool = False):
         if num is None:
             num = self.topk
         query_emb = self.encoder.encode(query)
-        with self._search_lock:
-            scores, idxs = self.index.search(query_emb, k=num)
+        scores, idxs = self.index.search(query_emb, k=num)
         idxs, scores = self._drop_padding(idxs[0], scores[0])
         if len(idxs) == 0:
             self._bump(stat_empty=1)
@@ -625,8 +622,7 @@ class DenseRetriever(BaseRetriever):
         for start_idx in range(0, len(query_list), self.batch_size):
             query_batch = query_list[start_idx : start_idx + self.batch_size]
             batch_emb = self.encoder.encode(query_batch)
-            with self._search_lock:
-                batch_scores, batch_idxs = self.index.search(batch_emb, k=num)
+            batch_scores, batch_idxs = self.index.search(batch_emb, k=num)
             batch_scores = batch_scores.tolist()
             batch_idxs = batch_idxs.tolist()
 
@@ -761,6 +757,7 @@ app = FastAPI()
 retriever = None
 config = None
 cache = QueryCache(0)
+aggregator = None  # QueryAggregator，main() 里创建；endpoint 用它 submit/await
 server_stats = {
     "requests": 0,
     "queries": 0,
@@ -799,17 +796,111 @@ def _trim_docs(docs: List[dict]) -> List[dict]:
     return out
 
 
-@app.post("/retrieve")
-def retrieve_endpoint(request: QueryRequest):
-    """Batch retrieval.
+class QueryAggregator:
+    """把并发请求的 query 攒批，一次 encode + search，再逐请求回填。
 
-    Deliberately a plain ``def``, not ``async def``: the body calls
-    ``retriever.batch_search``, which blocks on faiss/lucene. Declared async,
-    that call stalls the whole event loop, so with N concurrent rollout workers
-    the requests are serialised and the last ones wait N x latency -- enough to
-    blow through the client's timeout on a CPU-only index, which silently
-    degrades every search failure into "the model answers from memory".
-    A sync endpoint runs in starlette's threadpool instead.
+    WHY (2026-11-15):
+        The old sync endpoint ran each request in a threadpool thread; every
+        thread called encoder.encode + index.search, serialized by two locks
+        (Encoder._lock / _search_lock) so torch/faiss were never touched
+        concurrently. That worked but was a throughput ceiling: each request
+        encoded its own 1-3 queries separately (batch=1, CPU half idle), and
+        at training peak (~240 concurrent requests) the queue was N x latency
+        -> client 3s timeout blew every request.
+
+        This aggregator replaces lock-serialization with structure: ALL
+        encode/search happens in exactly ONE background thread, so concurrent
+        torch/faiss access is impossible by construction (MPS concurrent
+        forward deadlock, NPU faiss LIFO crash both disappear). Requests
+        queue in memory, get merged into batches of ``batch_size`` queries
+        (or after ``max_wait``), and one batched encode+search serves them
+        all -- batch 64 uses the CPU cores the way 64 separate batch-1
+        encodes never could.
+
+    Threading:
+        - event loop thread: async endpoint submits queries, awaits future
+        - aggregator thread (daemon): drains pending, batch-retrieves, fills
+          futures. The only thread that touches encoder / faiss.
+    """
+
+    def __init__(self, retriever, batch_size: int = 64, max_wait: float = 0.005):
+        self.retriever = retriever
+        self.batch_size = max(1, int(batch_size))
+        self.max_wait = max(0.0, float(max_wait))
+        self._pending: list = []  # [(queries, topk, future)]
+        self._cond = threading.Condition()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="query-aggregator")
+        self._thread.start()
+
+    def submit(self, queries: List[str], topk: int):
+        """endpoint 调用：提交 query 列表，返回 asyncio future，await 它拿结果。"""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        with self._cond:
+            self._pending.append((queries, topk, future))
+            self._cond.notify()
+        logger.debug("[agg] submit %d queries (topk=%d), pending=%d", len(queries), topk, len(self._pending))
+        return future
+
+    def _run(self):
+        """后台线程：攒批（够 batch_size 或 max_wait 窗口到期）→ 一次批检索 → 逐个回填。"""
+        while True:
+            with self._cond:
+                # 等第一批进来
+                while not self._pending:
+                    self._cond.wait()
+                t0 = time.time()
+                # 攒批：够 batch_size 就出发，否则等到 max_wait 窗口
+                while len(self._pending) < self.batch_size and time.time() - t0 < self.max_wait:
+                    wait = self.max_wait - (time.time() - t0)
+                    self._cond.wait(wait if wait > 0 else 0.01)
+                batch = self._pending
+                self._pending = []
+                logger.debug("[agg] drained %d requests, %d queries", len(batch), sum(len(q) for q, _, _ in batch))
+
+            # 按 topk 分组：不同 topk 不能合并（batch_search 的 num 参数是全批共享的）
+            by_topk: "Dict[int, List]" = {}
+            for queries, topk, future in batch:
+                by_topk.setdefault(topk, []).append((queries, future))
+
+            for topk, group in by_topk.items():
+                all_queries = []
+                for queries, future in group:
+                    all_queries.extend(queries)
+                try:
+                    results, scores = self.retriever.batch_search(all_queries, num=topk, return_score=True)
+                except Exception as exc:  # noqa: BLE001
+                    for queries, future in group:
+                        if not future.done():
+                            future.set_exception(exc)
+                    continue
+
+                # 按请求切分回填
+                idx = 0
+                for queries, future in group:
+                    n = len(queries)
+                    if not future.done():
+                        future.set_result((results[idx : idx + n], scores[idx : idx + n]))
+                    idx += n
+
+
+@app.post("/retrieve")
+async def retrieve_endpoint(request: QueryRequest):
+    """Batch retrieval (aggregator version).
+
+    async def + await aggregator future: requests no longer occupy a
+    threadpool thread each; they suspend on the event loop while the
+    QueryAggregator's single background thread merges all pending queries
+    into batches and serves them with one encode + search per batch.
+
+    The old sync version ran each request in starlette's threadpool and every
+    thread hit the (removed) encoder/search locks serially: at training peak
+    (~240 concurrent requests) the queue was N x latency, blowing the client
+    3s timeout. With the aggregator, N concurrent requests merge into ~N/64
+    batches and finish in hundreds of ms.
 
     Request:  {"queries": [...], "topk": 3, "return_scores": true}
     Response: {"result": [[{"document": {...}, "score": 0.71}, ...], ...],
@@ -841,15 +932,12 @@ def retrieve_endpoint(request: QueryRequest):
         else:
             pending.append(i)
 
-    errors = 0
+    errors = 00
     if pending:
         try:
-            ret = retriever.batch_search(
-                query_list=[request.queries[i] for i in pending],
-                num=topk,
-                return_score=True,
-            )
-            pending_results, pending_scores = ret
+            # 关键改动：不直接 batch_search，提交给聚合器并 await（不占线程池线程）
+            future = aggregator.submit([request.queries[i] for i in pending], topk)
+            pending_results, pending_scores = await future
         except Exception as exc:  # noqa: BLE001
             _record_request(n, (time.time() - t0) * 1000, errors=1)
             logger.exception("retrieval failed")
@@ -1022,6 +1110,10 @@ def main(argv=None):
 
     retriever = get_retriever(config)
     logger.info("[ready] %s", retriever.info())
+
+    global aggregator
+    aggregator = QueryAggregator(retriever, batch_size=64, max_wait=0.005)
+    logger.info("[ready] aggregator up (batch_size=64, max_wait=5ms)")
 
     uvicorn.run(
         app,
