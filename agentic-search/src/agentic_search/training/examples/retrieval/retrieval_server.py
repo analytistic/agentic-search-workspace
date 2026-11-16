@@ -875,7 +875,11 @@ class QueryAggregator:
                 except Exception as exc:  # noqa: BLE001
                     for queries, future in group:
                         if not future.done():
-                            future.set_exception(exc)
+                            # 跨线程回填必须用 call_soon_threadsafe：set_result/set_exception
+                            # 直接用 call_soon 只排进 _ready，不 _write_to_self() —— 事件循环
+                            # 阻塞在 select() 且无 fd 事件时回调永远不会执行，await 饿死。
+                            loop = future.get_loop()
+                            loop.call_soon_threadsafe(future.set_exception, exc)
                     continue
 
                 # 按请求切分回填
@@ -883,7 +887,10 @@ class QueryAggregator:
                 for queries, future in group:
                     n = len(queries)
                     if not future.done():
-                        future.set_result((results[idx : idx + n], scores[idx : idx + n]))
+                        loop = future.get_loop()
+                        loop.call_soon_threadsafe(
+                            future.set_result, (results[idx : idx + n], scores[idx : idx + n])
+                        )
                     idx += n
 
 
