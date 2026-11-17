@@ -269,7 +269,7 @@ if [ "$RANK" -eq 0 ]; then
         '+global_profiler.steps=[2]' \
         ++actor_rollout_ref.actor.profiler.enable=true \
         '+global_profiler.global_tool_config.torch.contents=[cuda,cpu,memory]' \
-        +global_profiler.save_path="$OUTPUT_DIR/profile"
+        '++global_profiler.save_path="$OUTPUT_DIR/profile"'
 # torch profiler (2026-11-17): step 2 only (user decision — step 1 is the
 # first step after val, skip it). Records CUDA/CPU ops + every CUDA
 # alloc/free (memory), then stops. Purpose: see the update_actor
