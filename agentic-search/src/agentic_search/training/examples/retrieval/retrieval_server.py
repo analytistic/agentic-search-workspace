@@ -832,12 +832,26 @@ class QueryAggregator:
         self._thread = threading.Thread(target=self._run, daemon=True, name="query-aggregator")
         self._thread.start()
 
+    @staticmethod
+    def _settle(future, value=None, exc=None):
+        if future.done():
+            return
+        if exc is not None:
+            future.set_exception(exc)
+        else:
+            future.set_result(value)
+
+    def _deliver(self, future, value=None, exc=None):
+        """把回填排进 loop 线程。
+        """
+        try:
+            future.get_loop().call_soon_threadsafe(self._settle, future, value, exc)
+        except RuntimeError:
+            logger.debug("[agg] event loop closed, drop result")
+
     def submit(self, queries: List[str], topk: int):
         """endpoint 调用：提交 query 列表，返回 asyncio future，await 它拿结果。"""
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
         future = loop.create_future()
         with self._cond:
             self._pending.append((queries, topk, future))
@@ -874,23 +888,14 @@ class QueryAggregator:
                     results, scores = self.retriever.batch_search(all_queries, num=topk, return_score=True)
                 except Exception as exc:  # noqa: BLE001
                     for queries, future in group:
-                        if not future.done():
-                            # 跨线程回填必须用 call_soon_threadsafe：set_result/set_exception
-                            # 直接用 call_soon 只排进 _ready，不 _write_to_self() —— 事件循环
-                            # 阻塞在 select() 且无 fd 事件时回调永远不会执行，await 饿死。
-                            loop = future.get_loop()
-                            loop.call_soon_threadsafe(future.set_exception, exc)
+                        self._deliver(future, exc=exc)
                     continue
 
                 # 按请求切分回填
                 idx = 0
                 for queries, future in group:
                     n = len(queries)
-                    if not future.done():
-                        loop = future.get_loop()
-                        loop.call_soon_threadsafe(
-                            future.set_result, (results[idx : idx + n], scores[idx : idx + n])
-                        )
+                    self._deliver(future, (results[idx : idx + n], scores[idx : idx + n]))
                     idx += n
 
 
@@ -939,10 +944,9 @@ async def retrieve_endpoint(request: QueryRequest):
         else:
             pending.append(i)
 
-    errors = 00
+    errors = 0
     if pending:
         try:
-            # 关键改动：不直接 batch_search，提交给聚合器并 await（不占线程池线程）
             future = aggregator.submit([request.queries[i] for i in pending], topk)
             pending_results, pending_scores = await future
         except Exception as exc:  # noqa: BLE001
