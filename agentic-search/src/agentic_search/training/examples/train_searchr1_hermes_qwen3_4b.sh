@@ -261,5 +261,17 @@ if [ "$RANK" -eq 0 ]; then
         trainer.val_only="$VAL_ONLY" \
         trainer.val_before_train="$VAL_BEFORE_TRAIN" \
         trainer.max_actor_ckpt_to_keep="$MAX_ACTOR_CKPT_TO_KEEP" \
-        trainer.default_local_dir="$SAVE_CHECKPOINT_DIR"
+        trainer.default_local_dir="$SAVE_CHECKPOINT_DIR" \
+        +global_profiler.tool=torch \
+        '+global_profiler.steps=[1,2]' \
+        +actor_rollout_ref.actor.profiler.enable=true \
+        '+global_profiler.global_tool_config.torch.contents=[cuda,cpu,memory]' \
+        +global_profiler.save_path="$OUTPUT_DIR/profile"
+# torch profiler (2026-11-17): steps [1,2] only — records CUDA/CPU ops + every
+# CUDA alloc/free (memory) for the first two steps, then stops. Purpose: see
+# the update_actor memory-peak composition (activations vs full-vocab logits
+# vs optimizer states) to decide how far ppo_micro_batch_size_per_gpu can go.
+# DELETE these 5 lines once the traces are collected — profiling overhead is
+# large (20-50% slower step) and trace files are GB-scale. View with
+# chrome://tracing or https://perfetto.dev.
 fi
