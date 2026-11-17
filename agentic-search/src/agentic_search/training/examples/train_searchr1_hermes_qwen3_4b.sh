@@ -142,7 +142,10 @@ VAL_ONLY="${VAL_ONLY:-False}"
 # Pre-training validation runs BEFORE step 1 by default (VAL_BEFORE_TRAIN=True):
 # it gives the step-0 baseline metrics. Costs one full validation rollout pass
 # over VAL_BATCH_SIZE before training starts. Set VAL_BEFORE_TRAIN=False to skip.
-VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-True}"
+# 2026-11-17: default False (user decision) — skip the ~10 min step-0
+# validation pass (700 questions @1 greedy); step-0 baseline already exists
+# from the 11-12 run, and test_freq=20 still gives periodic val metrics.
+VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
 # verl only evaluates `val_only` INSIDE the `val_before_train` branch
 # (verl/trainer/ppo/v1/trainer_base.py:421), so VAL_ONLY=True together with
 # VAL_BEFORE_TRAIN=False would silently start training instead of exiting
