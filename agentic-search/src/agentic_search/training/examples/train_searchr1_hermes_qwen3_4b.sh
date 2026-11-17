@@ -267,7 +267,7 @@ if [ "$RANK" -eq 0 ]; then
         trainer.default_local_dir="$SAVE_CHECKPOINT_DIR" \
         +global_profiler.tool=torch \
         '+global_profiler.steps=[2]' \
-        +actor_rollout_ref.actor.profiler.enable=true \
+        ++actor_rollout_ref.actor.profiler.enable=true \
         '+global_profiler.global_tool_config.torch.contents=[cuda,cpu,memory]' \
         +global_profiler.save_path="$OUTPUT_DIR/profile"
 # torch profiler (2026-11-17): step 2 only (user decision — step 1 is the
