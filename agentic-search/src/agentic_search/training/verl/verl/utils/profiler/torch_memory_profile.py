@@ -12,9 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+from pathlib import Path
 from typing import Optional
 
-from ..memory_utils import MemorySnapshotSampler, clear_memory_history, enable_memory_visualize
+from ..device import get_torch_device
+from ..memory_utils import enable_memory_visualize
 from .config import ProfilerConfig, TorchMemoryToolConfig
 
 
@@ -22,9 +25,10 @@ class TorchMemoryProfiler:
     """Profiler that dumps CUDA memory snapshots at step boundaries.
 
     Behavior:
-    - On first construction (per process), enable memory history recording if CUDA is available
-    - On start(step=X), remember sub_dir for this step
-    - On stop(), dump a memory snapshot into config.save_path under the remembered sub_dir
+    - On construction, do not record allocations (unselected steps stay unprofiled).
+    - On start(step=X), enable allocator history and remember this step's subdirectory.
+    - On stop(), dump a snapshot, then disable history even if dumping fails.
+    - Propagate recording/dump failures instead of silently producing no artifact.
     """
 
     _memory_history_enabled: bool = False
@@ -41,7 +45,6 @@ class TorchMemoryProfiler:
         self.rank = rank
         self.this_step = False
         self.sub_dir = None
-        self.sampler = MemorySnapshotSampler()
 
         # Get parameters from tool_config, with fallback to defaults
         if tool_config:
@@ -51,26 +54,19 @@ class TorchMemoryProfiler:
             self.trace_alloc_max_entries = 100_000
             self.stack_depth = 32
 
-        # Best-effort enable memory history once
-        if not TorchMemoryProfiler._memory_history_enabled:
-            try:
-                enable_memory_visualize(
-                    trace_alloc_max_entries=self.trace_alloc_max_entries, stack_depth=self.stack_depth
-                )
-            except Exception:
-                # silently ignore if not supported
-                pass
-            TorchMemoryProfiler._memory_history_enabled = True
-
     def start(self, **kwargs):
-        if not self.enable:
+        if not self.enable or not self._should_profile_this_rank() or self.this_step:
             return
-        if not self._should_profile_this_rank():
-            return
+        device = get_torch_device()
+        if not device.is_available():
+            raise RuntimeError("Memory-only profiling requires an available accelerator")
+        enable_memory_visualize(trace_alloc_max_entries=self.trace_alloc_max_entries, stack_depth=self.stack_depth)
+        TorchMemoryProfiler._memory_history_enabled = True
         profile_step = kwargs.get("profile_step", None)
         # Keep ranks aligned under same folder name
         self.sub_dir = f"step{profile_step}" if profile_step is not None else None
         self.this_step = True
+        print(f"[MemoryProfiler] Recording step {profile_step}, rank {self.rank}", flush=True)
 
     def stop(self):
         if not self.enable or not self.this_step:
@@ -78,16 +74,24 @@ class TorchMemoryProfiler:
         self.this_step = False
         if not self._should_profile_this_rank():
             return
-        out_dir = self.config.save_path or "outputs/profile"
-        tag = "torch_memory"
-        # Dump snapshot; all ranks write into same sub_dir
+        device = get_torch_device()
         try:
-            self.sampler.dump_memory_snapshot(out_dir=out_dir, tag=tag, sub_dir=self.sub_dir)
-        except Exception:
-            pass
-        # Clear memory history
-        if TorchMemoryProfiler._memory_history_enabled:
-            clear_memory_history(trace_alloc_max_entries=self.trace_alloc_max_entries, stack_depth=self.stack_depth)
+            out_dir = Path(self.config.save_path or "outputs/profile")
+            if self.sub_dir is not None:
+                out_dir = out_dir / self.sub_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path = out_dir / f"torch_memory_rank{self.rank}_pid{os.getpid()}.pickle"
+            device.synchronize()
+            device.memory._dump_snapshot(str(path))
+            if not path.is_file() or path.stat().st_size == 0:
+                raise RuntimeError(f"Memory profiler did not produce a non-empty snapshot: {path}")
+            print(f"[MemoryProfiler] Saved snapshot: {path}", flush=True)
+        finally:
+            # Resetting via clear_memory_history would re-enable recording and
+            # continue profiling later, unselected steps. Disable it instead.
+            if TorchMemoryProfiler._memory_history_enabled:
+                device.memory._record_memory_history(enabled=None)
+                TorchMemoryProfiler._memory_history_enabled = False
 
     def _should_profile_this_rank(self) -> bool:
         if self.config.all_ranks:

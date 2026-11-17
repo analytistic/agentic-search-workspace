@@ -127,7 +127,7 @@ MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
-ROLLOUT_TP="${ROLLOUT_TP:-2}"   # 2026-11-17: 1->2 (A800-80G x2). TP=2 -> num_replicas=1 (llm_server.py: world_size//rollout_world_size), single sglang server across both cards: no idle card during long-tail gen, bigger KV pool, one weight sync instead of two.
+ROLLOUT_TP="${ROLLOUT_TP:-1}"   # TP=1: no tensor sharding for rollout; two single-GPU replicas on 2xA800.
 MAX_TURNS="${MAX_TURNS:-10}"
 # 0.7 (2026-11-17, was 0.6): bigger KV pool on A800-80G -> more concurrent
 # sequences in sglang (real cap is the KV pool, not max_num_seqs). 11-12 run
@@ -265,17 +265,13 @@ if [ "$RANK" -eq 0 ]; then
         trainer.val_before_train="$VAL_BEFORE_TRAIN" \
         trainer.max_actor_ckpt_to_keep="$MAX_ACTOR_CKPT_TO_KEEP" \
         trainer.default_local_dir="$SAVE_CHECKPOINT_DIR" \
-        +global_profiler.tool=torch \
-        '+global_profiler.steps=[2]' \
+        ++global_profiler.tool=torch_memory \
+        '++global_profiler.steps=[2]' \
         ++actor_rollout_ref.actor.profiler.enable=true \
-        '+global_profiler.global_tool_config.torch.contents=[cuda,cpu,memory]' \
-        '++global_profiler.save_path="$OUTPUT_DIR/profile"'
-# torch profiler (2026-11-17): step 2 only (user decision — step 1 is the
-# first step after val, skip it). Records CUDA/CPU ops + every CUDA
-# alloc/free (memory), then stops. Purpose: see the update_actor
-# memory-peak composition (activations vs full-vocab logits vs optimizer
-# states) to decide how far ppo_micro_batch_size_per_gpu can go.
-# DELETE these 5 lines once the traces are collected — profiling overhead is
-# large (20-50% slower step) and trace files are GB-scale. View with
-# chrome://tracing or https://perfetto.dev.
+        ++global_profiler.save_path="$OUTPUT_DIR/profile"
+# Memory-only profiling: record allocator history in the actor worker on
+# step 2, then dump a .pickle snapshot and disable history recording.
+# No CPU operator or CUDA kernel timeline is collected. History is bounded
+# by TorchMemoryToolConfig.trace_alloc_max_entries; view with memory_viz.
+# Snapshot path: $OUTPUT_DIR/profile/step2/torch_memory_rank*_pid*.pickle
 fi
