@@ -145,7 +145,7 @@ actor_rollout_ref:
       do_sample: false
       temperature: 0
     tensor_model_parallel_size: 1
-    gpu_memory_utilization: 0.35   # actor + ref + rollout share one 24G card
+    gpu_memory_utilization: 0.7   # 2026-11-17: 0.35→0.7 (A800-80G; was sized for 24G 4090D). Bigger KV pool -> more concurrent sglang sequences. Launcher CLI overrides to the same 0.7.
     max_num_batched_tokens: 12288
     log_prob_micro_batch_size_per_gpu: 4   # forward-only; bumped 2->4 2026-11-12 (old_log_prob fwd, fewer calls)
     trace:
