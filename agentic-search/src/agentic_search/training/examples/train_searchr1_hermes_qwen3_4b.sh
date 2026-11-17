@@ -127,7 +127,7 @@ MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-128}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
-ROLLOUT_TP="${ROLLOUT_TP:-1}"   # 4B fits one 24G card; TP=1 avoids cross-card comm
+ROLLOUT_TP="${ROLLOUT_TP:-2}"   # 2026-11-17: 1->2 (A800-80G x2). TP=2 -> num_replicas=1 (llm_server.py: world_size//rollout_world_size), single sglang server across both cards: no idle card during long-tail gen, bigger KV pool, one weight sync instead of two.
 MAX_TURNS="${MAX_TURNS:-10}"
 # 0.7 (2026-11-17, was 0.6): bigger KV pool on A800-80G -> more concurrent
 # sequences in sglang (real cap is the KV pool, not max_num_seqs). 11-12 run
