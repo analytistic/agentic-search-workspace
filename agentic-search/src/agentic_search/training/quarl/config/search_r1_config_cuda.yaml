@@ -138,7 +138,7 @@ actor_rollout_ref:
     prompt_length: 4096    # per-sample prompt cap (must match launcher data.max_prompt_length)
     response_length: 8192  # per-sample generation cap, multi-turn total (must match launcher data.max_response_length)
     max_model_len: 12288   # vLLM engine cap = prompt 4096 + response 8192
-    max_num_seqs: 256   # per-replica concurrent sequences (long multi-turn prompts; bounded by KV cache via gpu_memory_utilization)
+    max_num_seqs: 2560   # 2026-11-17: 256→2560 (user decision). Effectively "no cap": sglang clamps to min(value, max_total_num_tokens//2, req_to_token_pool) in model_runner.py:558, so the real concurrency limit is the KV pool size (gpu_memory_utilization), not this gate.
     n: 5                # samples per question
     val_kwargs:         # validation sampling: EM-standard @1 greedy, same protocol as the standalone eval
       n: 1

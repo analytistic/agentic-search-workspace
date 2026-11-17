@@ -129,9 +129,10 @@ MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-8192}"
 ROLLOUT_N="${ROLLOUT_N:-5}"
 ROLLOUT_TP="${ROLLOUT_TP:-1}"   # 4B fits one 24G card; TP=1 avoids cross-card comm
 MAX_TURNS="${MAX_TURNS:-10}"
-# 0.6 gives sglang ~14.4G KV+weights on 24G; actor+ref FSDP fits in the
-# remaining ~9.6G (micro-bounded activations).
-ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.6}"
+# 0.7 (2026-11-17, was 0.6): bigger KV pool on A800-80G -> more concurrent
+# sequences in sglang (real cap is the KV pool, not max_num_seqs). 11-12 run
+# peaked at ~60G/80G with the old 0.6, so 0.7 leaves ~24G for actor+ref FSDP.
+ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.7}"
 LR="${LR:-1e-6}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
