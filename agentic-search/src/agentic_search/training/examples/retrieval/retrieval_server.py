@@ -33,6 +33,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -1126,12 +1127,20 @@ def main(argv=None):
     aggregator = QueryAggregator(retriever, batch_size=64, max_wait=0.005)
     logger.info("[ready] aggregator up (batch_size=64, max_wait=5ms)")
 
+    # Uvicorn uses its own non-propagating loggers; basicConfig above does not
+    # timestamp HTTP access or server-error lines. Preserve its default fields
+    # and add local date/time with milliseconds (logging's default asctime).
+    log_config = deepcopy(uvicorn.config.LOGGING_CONFIG)
+    for name in ("default", "access"):
+        log_config["formatters"][name]["fmt"] = "%(asctime)s " + log_config["formatters"][name]["fmt"]
+
     uvicorn.run(
         app,
         host=args.host,
         port=args.port,
         log_level=args.log_level.lower(),
-        access_log=True,  # per-request "POST /retrieve 200" lines (visible in the retriever log)
+        log_config=log_config,
+        access_log=True,  # per-request timestamp + "POST /retrieve 200" lines
     )
 
 
