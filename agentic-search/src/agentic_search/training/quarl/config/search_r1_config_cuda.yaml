@@ -149,6 +149,7 @@ actor_rollout_ref:
     max_num_batched_tokens: 12288
     prometheus:
       enable: true   # 2026-11-17: expose sglang server /metrics (num_running_reqs, queue depth, token_usage, gen throughput) for rollout bubble analysis. Without this the sglang HTTP metrics endpoint is not opened at all (only gRPC + NCCL ports).
+    disable_log_stats: false   # 2026-11-17: required by prometheus.enable=true (llm_server.py:585 raises "Metrics monitoring requires disable_log_stats=False" otherwise). rollout.yaml default is True; 13:15 TP=2 launch died on this check.
     log_prob_micro_batch_size_per_gpu: 4   # forward-only; bumped 2->4 2026-11-12 (old_log_prob fwd, fewer calls)
     trace:
       backend: null     # 2026-11-17: mlflow→null (user decision, get training running).
