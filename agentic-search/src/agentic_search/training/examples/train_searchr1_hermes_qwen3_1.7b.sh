@@ -131,6 +131,8 @@ MAX_TURNS="${MAX_TURNS:-10}"
 # remaining ~9.6G (micro-bounded activations). Was 0.35 in the debug run.
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.6}"
 LR="${LR:-1e-6}"
+# SSP 论文 (arXiv:2510.18821) KL loss 系数：0.01（verl 默认 0.001）
+KL_COEF="${KL_COEF:-0.01}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-20}"
@@ -282,6 +284,7 @@ if [ "$RANK" -eq 0 ]; then
         data.max_response_length="$MAX_RESPONSE_LENGTH" \
         actor_rollout_ref.actor.ppo_mini_batch_size="$MINI_BATCH_SIZE" \
         actor_rollout_ref.actor.optim.lr="$LR" \
+        actor_rollout_ref.actor.kl_coef="$KL_COEF" \
         actor_rollout_ref.rollout.n="$ROLLOUT_N" \
         actor_rollout_ref.rollout.tensor_model_parallel_size="$ROLLOUT_TP" \
         actor_rollout_ref.rollout.gpu_memory_utilization="$ROLLOUT_GPU_MEMORY_UTILIZATION" \

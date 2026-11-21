@@ -10,8 +10,6 @@ JSON string (``{"result": "Doc 1 (Title: ...)..."}``).
 import json
 import logging
 import os
-import time
-import traceback
 import uuid
 from typing import Any, Optional
 
@@ -55,7 +53,7 @@ def call_search_api(
     return_scores: bool = True,
     timeout: int = TIMEOUT,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    """Call the remote search API with retry logic and increasing delays.
+    """Call the remote search API with retry logic.
 
     Args:
         retrieval_service_url: The URL of the retrieval service API.
@@ -72,6 +70,17 @@ def call_search_api(
     """
     request_id = str(uuid.uuid4())
     log_prefix = f"[Search Request ID: {request_id}] "
+
+    # 先申请返回变量，后续所有分支只改它
+    result = None
+
+    # 格式校验：请求是否符合 /retrieve 的期望格式，不符合直接返回格式错误
+    if not isinstance(query_list, list) or len(query_list) == 0:
+        return None, "Search error: query_list must be a non-empty list"
+    if not all(isinstance(q, str) and q.strip() for q in query_list):
+        return None, "Search error: all queries must be non-empty strings"
+    if not isinstance(topk, int) or topk <= 0:
+        return None, f"Search error: topk must be a positive integer, got {topk!r}"
 
     payload = {"queries": query_list, "topk": topk, "return_scores": return_scores}
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -100,45 +109,21 @@ def call_search_api(
                     f"{attempt + 1}/{MAX_RETRIES}"
                 )
                 logger.warning(last_error)
-                if attempt < MAX_RETRIES - 1:
-                    delay = INITIAL_RETRY_DELAY * (attempt + 1)
-                    logger.info(f"{log_prefix}Retrying after {delay} seconds...")
-                    time.sleep(delay)
                 continue
 
             response.raise_for_status()
             logger.info(f"{log_prefix}Search API call successful on attempt {attempt + 1}")
-            return response.json(), None
+            result = response.json()
+            return result, None
 
-        except requests.exceptions.ConnectionError as e:
-            last_error = f"{log_prefix}Connection Error: {e}"
-            logger.warning(last_error)
-            if attempt < MAX_RETRIES - 1:
-                delay = INITIAL_RETRY_DELAY * (attempt + 1)
-                logger.info(f"{log_prefix}Retrying after {delay} seconds...")
-                time.sleep(delay)
-            continue
-        except requests.exceptions.Timeout as e:
-            last_error = f"{log_prefix}Timeout Error: {e}"
-            logger.warning(last_error)
-            if attempt < MAX_RETRIES - 1:
-                delay = INITIAL_RETRY_DELAY * (attempt + 1)
-                logger.info(f"{log_prefix}Retrying after {delay} seconds...")
-                time.sleep(delay)
-            continue
-        except requests.exceptions.RequestException as e:
-            last_error = f"{log_prefix}API Request Error: {e}"
-            break
-        except json.JSONDecodeError as e:
-            raw_response_text = response.text if "response" in locals() else "N/A"
-            last_error = f"{log_prefix}API Response JSON Decode Error: {e}, Response: {raw_response_text[:200]}"
-            break
         except Exception as e:
-            last_error = f"{log_prefix}Unexpected Error: {e}"
-            break
+            last_error = f"{log_prefix}{type(e).__name__}: {str(e)[:200]}"
+            logger.warning(last_error)
+            continue
 
+    # 失败：error 字符串 200 截断
     logger.error(f"{log_prefix}Search API call failed. Last error: {last_error}")
-    return None, last_error.replace(log_prefix, "API Call Failed: ") if last_error else "API Call Failed after retries"
+    return result, (last_error or "API Call Failed after retries").replace(log_prefix, "")[:200]
 
 
 def _passages2string(retrieval_result) -> str:
@@ -176,18 +161,13 @@ def perform_single_search_batch(
     api_response = None
     error_msg = None
 
-    try:
-        api_response, error_msg = call_search_api(
-            retrieval_service_url=retrieval_service_url,
-            query_list=query_list,
-            topk=topk,
-            return_scores=True,
-            timeout=timeout,
-        )
-    except Exception as e:
-        error_msg = f"API Request Exception during batch search: {e}"
-        logger.error(f"Batch search: {error_msg}")
-        traceback.print_exc()
+    api_response, error_msg = call_search_api(
+        retrieval_service_url=retrieval_service_url,
+        query_list=query_list,
+        topk=topk,
+        return_scores=True,
+        timeout=timeout,
+    )
 
     metadata = {
         "query_count": len(query_list),
@@ -222,8 +202,9 @@ def perform_single_search_batch(
                 pretty_results = []
                 total_results = 0
 
-                for retrieval in raw_results:
-                    formatted = _passages2string(retrieval)
+                # 每个 query 的结果前标注它自己的检索词（服务端按 query_list 顺序返回）
+                for query, retrieval in zip(query_list, raw_results):
+                    formatted = f"Query: {query}\n{_passages2string(retrieval)}"
                     pretty_results.append(formatted)
                     total_results += len(retrieval) if isinstance(retrieval, list) else 1
 
@@ -258,11 +239,6 @@ def search(query_list: list[str]) -> str:
     Args:
         query_list: A list of fully-formed semantic queries. The tool will return search results for each query.
     """
-    # Parser may degrade an array parameter to a plain string when the model
-    # skips the list syntax (e.g. literal_eval fails); normalize to a list.
-    if isinstance(query_list, str):
-        query_list = [query_list]
-
     result_text, metadata = perform_single_search_batch(
         retrieval_service_url=_retrieval_url(),
         query_list=query_list,

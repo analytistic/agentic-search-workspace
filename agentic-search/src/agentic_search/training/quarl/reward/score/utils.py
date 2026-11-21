@@ -473,7 +473,7 @@ Please respond only with "Correct" or "Wrong". Do not provide any additional exp
     ]
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {"model": model, "messages": messages, "temperature": 0.1, "max_tokens": 2048, "stream": False}
+    payload = {"model": model, "messages": messages, "temperature": 0.1, "max_tokens": 64, "stream": False}
 
     for attempt in range(5):
         try:
@@ -511,7 +511,10 @@ Please respond only with "Correct" or "Wrong". Do not provide any additional exp
             if "<think>" in content and "</think>" in content:
                 content = content.split("</think>")[-1].strip()
 
-            matched = "correct" in content.lower()
+            # word-boundary match: substring "correct" would also match
+            # "incorrect" (judge says Wrong -> model gets 1.0). \b keeps it to
+            # the standalone word only.
+            matched = re.search(r"\bcorrect\b", content.lower()) is not None
             if matched and (open_count > 10 or close_count > 10):  # answer-tag spam
                 return 0.25
             return 1.0 if matched else 0.0
