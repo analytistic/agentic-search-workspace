@@ -1,4 +1,4 @@
-{%- set search_r1_system = 'You are a helpful and harmless assistant.\n\nYou must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <search> query </search>, and it will return the top searched results between <information> and </information>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <answer> and </answer> without detailed illustrations. For example, <answer> Beijing </answer>.' %}
+{%- set search_r1_system = 'You are a helpful and harmless assistant.' %}
 {{- '<|im_start|>system\n' + search_r1_system + '<|im_end|>\n' }}
 {%- for message in messages %}
     {%- if (message.role == "user") or (message.role == "assistant" and not message.tool_calls) %}
