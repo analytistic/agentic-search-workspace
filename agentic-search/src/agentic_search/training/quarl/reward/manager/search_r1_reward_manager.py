@@ -78,6 +78,12 @@ class SearchR1RewardManager(RewardManagerBase):
         data_source = data_item.non_tensor_batch["data_source"]
         ground_truth = data_item.non_tensor_batch["reward_model"]["ground_truth"]
         extra_info = dict(data_item.non_tensor_batch.get("extra_info", {}))
+        if not extra_info.get("question"):
+            raw_prompt = data_item.non_tensor_batch.get("raw_prompt")
+            if isinstance(raw_prompt, str):
+                extra_info["question"] = raw_prompt
+            else:
+                extra_info["question"] = raw_prompt[-1]["content"]
         num_turns = data_item.non_tensor_batch.get("__num_turns__", None)
         if num_turns is not None:
             extra_info["num_turns"] = num_turns

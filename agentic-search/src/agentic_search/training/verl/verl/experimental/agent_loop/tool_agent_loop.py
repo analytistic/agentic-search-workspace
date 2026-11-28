@@ -278,6 +278,12 @@ class ToolAgentLoop(AgentLoopBase):
             agent_data.response_mask += [1] * len(agent_data.response_ids)
             if output.log_probs:
                 agent_data.response_logprobs += output.log_probs
+            eos_id = self.tokenizer.eos_token_id
+            if eos_id is not None and (not agent_data.response_ids or agent_data.response_ids[-1] != eos_id):
+                agent_data.prompt_ids.append(eos_id)
+                agent_data.response_mask.append(0)
+                if agent_data.response_logprobs:
+                    agent_data.response_logprobs.append(0.0)
 
         if output.routed_experts is not None:
             agent_data.routed_experts = output.routed_experts

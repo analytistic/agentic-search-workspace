@@ -197,7 +197,7 @@ def is_valid_sequence_search_r1(text):
 
     # Extract the content after the assistant marker
     start_pos = assistant_match.end()
-    content = text[start_pos:]
+    content = re.sub(r"<\|im_end\|>|<\|im_start\|>(?:user|assistant)", " ", text[start_pos:])
 
     # Check for balanced tags
     tags_to_check = ["think", "search", "information", "answer"]
@@ -452,7 +452,7 @@ def qa_judge_compute_score(
             question = prompt_str
 
     prompt = f"""
-Please determine whether the model's answer is consistent with the reference answer:
+Please determine whether the model’s answer is consistent with the reference answer:
 
 Question: {question}
 Model Answer: {answer}
@@ -468,7 +468,7 @@ Evaluation Criteria:
 Please respond only with "Correct" or "Wrong". Do not provide any additional explanation.
 """
     messages = [
-        {"role": "system", "content": "You are a professional judge who evaluates the correctness of answers."},
+        {"role": "system", "content": "You are a professional judge who evaluates the correctness of answers based on given criteria."},
         {"role": "user", "content": prompt},
     ]
     url = f"{base_url.rstrip('/')}/chat/completions"
