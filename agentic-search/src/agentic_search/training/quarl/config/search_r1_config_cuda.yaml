@@ -1,4 +1,6 @@
-# CUDA single-box variant of search_r1_config.yaml (Qwen3-1.7B, hermes protocol).
+# CUDA single-box variant of search_r1_config.yaml (Qwen3-1.7B).
+# Protocol fields below default to the legacy <search> tag format; the chat
+# template is injected as ${oc.env:Chat_Template} by whichever launcher runs.
 #
 # WHY a separate file (2026-11-11):
 #   the original targets the Ascend/NPU box (8 cards, device=npu,
@@ -9,7 +11,9 @@
 #   GPUs 8' and a flash_attn ImportError). So the settings live in the config.
 #   The launcher still owns the knobs: everything below reads ${oc.env:...}.
 #
-# Usage: bash train_searchr1_hermes_qwen3_1.7b.sh
+# Launchers (both share this yaml):
+#   bash train_searchr1_search_qwen3_1.7b.sh    # <search> tags, search_r1.jinja
+#   bash train_searchr1_hermes_qwen3_1.7b.sh   # <tool_call> JSON, qwen3_hermes.jinja
 hydra:
   searchpath:
     - file://${oc.env:WORKSPACE,./}/verl/verl/trainer/config
@@ -24,15 +28,15 @@ trainer:
   n_gpus_per_node: 2
   nnodes: 1
   total_epochs: 1          # verl default is 30
-  project_name: hermes   # = the mlflow Experiment name
-  experiment_name: ${oc.env:EXPERIMENT_NAME,searchr1_hermes_qwen3_1.7b}
+  project_name: hermes   # mlflow Experiment name; historical label, shared by both launchers
+  experiment_name: ${oc.env:EXPERIMENT_NAME,searchr1_hermes_qwen3_1.7b}   # launcher exports EXPERIMENT_NAME
   logger: ["console", "mlflow"]
   val_before_train: true    # run the val pass BEFORE step 1 -> step-0 baseline (700 questions @1 greedy)
   val_only: false
   save_freq: 20
   test_freq: 20
   max_actor_ckpt_to_keep: 1   # only the newest checkpoint survives (GRPO has no critic ckpt); launcher overrides via CLI
-  default_local_dir: ${oc.env:SAVE_CHECKPOINT_DIR,/root/data/train_runs/searchr1_hermes_Qwen3-1.7B/ckpt}
+  default_local_dir: ${oc.env:SAVE_CHECKPOINT_DIR,/root/data/train_runs/searchr1_hermes_Qwen3-1.7B/ckpt}   # launcher exports SAVE_CHECKPOINT_DIR
 
 algorithm:
   name: search_r1
@@ -47,7 +51,7 @@ reward:
     path: ${oc.env:WORKSPACE}/quarl/reward/score/search_r1_score.py
     name: compute_score
     reward_kwargs:
-      format_check: qwen3   # hermes 协议（qwen3_hermes.jinja）；qwen3_5 / search_r1 可选
+      format_check: search_r1   # reward-side structure check; must match multi_turn.format and Chat_Template
       use_judge: ${oc.env:USE_JUDGE,false}   # no judge service reachable from this box
   reward_manager:
     source: importlib
@@ -78,16 +82,16 @@ data:
   dataloader_num_workers: 4
   filter_overlong_prompts_workers: 8   # num_proc for the overlong-prompt filter (RLHFDataset.maybe_filter_out_long_prompts)
   max_samples_per_source: 100   # val only: at most N samples per data_source (0 = keep all; stratified subsample, cached as <stem>_sub<N>.parquet)
-  clean_question: true    # hermes launchers flip to true: strip Search-R1 long instructions / system messages from prompts (qwen*_hermes.jinja supplies a unified system prompt)
+  clean_question: false    # keep the original Search-R1 instructions in the parquet prompts; hermes needs true (it strips them)
   apply_chat_template_kwargs:
-    enable_thinking: true   # thinking on (auto <think> start on qwen3.x templates; no-op for the Qwen2.5 search template)
+    enable_thinking: true   # passed to apply_chat_template; no-op for search_r1.jinja, only qwen3_hermes.jinja branches on false
 
 actor_rollout_ref:
   model:
     enable_gradient_checkpointing: true   # explicit (default is also True)
     override_config:
       attn_implementation: flash_attention_2   # flash-attn 2.8.3 built for torch 2.9.1/sm_89 (was sdpa before the wheel existed)
-    custom_chat_template: ${oc.env:HERMES_JINJA,null}   # qwen3_hermes.jinja (launcher exports HERMES_JINJA)
+    custom_chat_template: ${oc.env:Chat_Template,null}
     path: /root/data/models/Qwen3-1.7B   # launcher 用 CLI 覆盖（actor_rollout_ref.model.path="$MODEL_PATH"）
   actor:
     # Fixed-size micro batches (dynamic bsz rolled back 2026-10-29).
@@ -169,15 +173,20 @@ actor_rollout_ref:
       max_parallel_calls: 3   # multiple <search> blocks per round (one query each) execute in parallel
       max_tool_response_length: 8192   # cap tool-result characters at the whole generation window (== response_length): no eager truncation (SSP-style), the multi-turn total-length check guards the window
       tool_response_truncate_side: right   # keep the head (top-k ranked docs) when truncating
-      format: hermes   # JSON <tool_call> tool calling (qwen3_hermes.jinja)
-      enable: true # enable multi-turn rollout
-      use_inference_chat_template: false # use inference chat template
-      tokenization_sanity_check_mode: disable # disable tokenization sanity check
-      function_tool_path: ${oc.env:WORKSPACE}/quarl/tool/search_tool_fn.py
+      format: search   # ToolParser registry key -> quarl SearchToolParser (<search>query</search>)
+      enable: true # allow tool-call turns
+      use_inference_chat_template: false # append turns incrementally instead of re-rendering the whole message list
+      tokenization_sanity_check_mode: disable # skip the re-render-vs-incremental token diff check
+      function_tool_path: ${oc.env:WORKSPACE}/quarl/tool/search_tool_fn.py   # registers @function_tool search and @ToolParser.register("search")
     agent:
-      default_agent_loop: tool_agent   # verl stock ToolAgentLoop (JSON tool calling, search = only tool)
-      agent_loop_config_path: null
+      default_agent_loop: tool_agent   # verl ToolAgentLoop state machine; parser comes from multi_turn.format
+      agent_loop_config_path: null   # use the built-in agent loop registry
       num_workers: 8   # agent-loop orchestration workers (asyncio pools; NOT GPUs). Was 2; bumped 4->8 2026-11-12 to parallelize rollout tool-calling/retrieve.
+      agent_loop_manager_class: quarl.agent_loop.agent_loop.SearchAgentloopManager
+    custom:
+      solver:   # read by SearchAgentloopWorker via config.custom[self.role]
+        stop: ["</answer>", "</search>"]   # sampling_params stop strings (SGLang)
+        no_stop_trim: true   # keep closing tags in the output so the parser and format_check can match them
 
 
 

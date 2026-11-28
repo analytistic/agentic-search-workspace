@@ -6,7 +6,7 @@
 # The retrieval service is NOT started here -- run it once, separately:
 #   bash "$TRAINING_DIR/examples/start_retriever.sh"   # dense e5 + HNSW, CPU faiss, :8000
 #
-# Usage: bash train_searchr1_hermes_qwen3_4b_cuda.sh  [hydra CLI overrides...]
+# Usage: bash train_searchr1_hermes_qwen3_4b.sh  [hydra CLI overrides...]
 
 set -euo pipefail
 
@@ -55,8 +55,8 @@ export NCCL_NVLS_ENABLE="${NCCL_NVLS_ENABLE:-1}"   # use NVLink SHARP if availab
 export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"           # quieter than INFO on A800
 
 # custom chat template: passed via env var (Hydra CLI overrides cannot lex the
-# jinja text); consumed in the config as ${oc.env:HERMES_JINJA}
-export HERMES_JINJA="${HERMES_JINJA:-$(cat "$TRAINING_DIR/quarl/template/qwen3_hermes.jinja")}"
+# jinja text); consumed in the config as ${oc.env:Chat_Template}
+export Chat_Template="${Chat_Template:-$(cat "$TRAINING_DIR/quarl/template/qwen3_hermes.jinja")}"
 
 # ---- model / data ----
 MODEL_PATH="${MODEL_PATH:-/root/data/models/Qwen3-4B}"   # Qwen3-4B (native <think> + hermes JSON <tool_call> tool calling)
@@ -249,6 +249,10 @@ if [ "$RANK" -eq 0 ]; then
     # 落哪：落在 SAVE_CHECKPOINT_DIR 说明 CLI 生效；落在 yaml 默认说明回退）
     "$PYTHON" -m quarl.main_rl \
         --config-name search_r1_config_cuda \
+        actor_rollout_ref.rollout.multi_turn.format=hermes \
+        data.clean_question=true \
+        reward.custom_reward_function.reward_kwargs.format_check=qwen3 \
+        actor_rollout_ref.rollout.custom.solver.stop='["</answer>"]' \
         actor_rollout_ref.model.path="$MODEL_PATH" \
         data.train_batch_size="$BATCH_SIZE" \
         data.val_batch_size="$VAL_BATCH_SIZE" \

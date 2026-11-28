@@ -1,23 +1,8 @@
-{# Search-R1 chat template for Qwen2.5, based on the official tokenizer jinja.
-   Changes vs stock:
-   - system message is "You are a helpful and harmless assistant." (same as the
-     eval data) -- no Qwen default, no # Tools section, no JSON <tool_call>
-     guide. The search protocol is taught entirely by the data prompts
-     (<search>query</search> / <information> / <answer>).
-   - tool messages render without the stock <tool_response> wrapper: the
-     template wraps them in <information>...</information> (the search
-     protocol the data prompts teach), so the search tool returns plain text.
-   Role markers and the message loop are unchanged from the official template. #}
-{{- '<|im_start|>system\n' }}
-{%- if messages[0]['role'] == 'system' %}
-    {{- messages[0]['content'] }}
-{%- else %}
-    {{- 'You are a helpful and harmless assistant.' }}
-{%- endif %}
-{{- '<|im_end|>\n' }}
+{%- set search_r1_system = 'You are a helpful and harmless assistant.\n\nYou must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <search> query </search>, and it will return the top searched results between <information> and </information>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <answer> and </answer> without detailed illustrations. For example, <answer> Beijing </answer>.' %}
+{{- '<|im_start|>system\n' + search_r1_system + '<|im_end|>\n' }}
 {%- for message in messages %}
-    {%- if (message.role == "user") or (message.role == "system" and not loop.first) or (message.role == "assistant" and not message.tool_calls) %}
-        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}
+    {%- if (message.role == "user") or (message.role == "assistant" and not message.tool_calls) %}
+        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>\n' }}
     {%- elif message.role == "assistant" %}
         {{- '<|im_start|>' + message.role }}
         {%- if message.content %}

@@ -2,7 +2,7 @@
 
 Parses the plain-text ``<search>query</search>`` format the previous
 Search-R1 pipeline worked with, wrapping each query into the current
-search tool schema (``{"query": ...}``). Select via
+search tool schema (``{"query_list": [query]}``). Select via
 ``multi_turn.format: search``; switch back to ``hermes`` (or a dual parser)
 when the model emits JSON tool calls natively (e.g. Qwen3).
 """
