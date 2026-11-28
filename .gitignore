@@ -47,3 +47,4 @@ htmlcov/
 
 # Local environment overrides — never tracked.
 **/.env
+**/.env.*
