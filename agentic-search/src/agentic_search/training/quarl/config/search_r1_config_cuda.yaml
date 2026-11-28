@@ -53,6 +53,8 @@ reward:
     reward_kwargs:
       format_check: search_r1   # reward-side structure check; must match multi_turn.format and Chat_Template
       use_judge: ${oc.env:USE_JUDGE,false}   # no judge service reachable from this box
+      structure_format_score: 0
+      final_format_score: 0
   reward_manager:
     source: importlib
     name: SearchR1RewardManager

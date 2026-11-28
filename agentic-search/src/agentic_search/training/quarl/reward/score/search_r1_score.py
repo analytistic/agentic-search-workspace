@@ -37,6 +37,8 @@ def compute_score(
     validate=False,
     format_check="search_r1",
     use_judge=True,
+    structure_format_score=0.2,
+    final_format_score=0.1,
 ):
     """Search-R1 layered score: format compliance + answer correctness.
 
@@ -58,7 +60,12 @@ def compute_score(
     check = _FORMAT_CHECKS.get(format_check, is_valid_sequence_search_r1)
 
     # 1. format score: structure compliance only
-    fmt = qa_format_compute_score(solution_str, format_check=check)
+    fmt = qa_format_compute_score(
+        solution_str,
+        structure_format_score=structure_format_score,
+        final_format_score=final_format_score,
+        format_check=check,
+    )
 
     # 2. answer score: EM first, optional LLM judge for the misses
     if data_source in MATH_DATA_SOURCES:
